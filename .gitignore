@@ -126,3 +126,7 @@ data/ssd_dataloader.py
 
 # pylint
 .pylintrc
+
+# project
+weights/
+data/VOCdevkit/
