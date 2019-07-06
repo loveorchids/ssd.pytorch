@@ -5,7 +5,7 @@ from torch.autograd import Variable
 from layers import *
 from data import voc, coco
 import os
-
+import mmdet.ops.dcn as dcn
 
 class SSD(nn.Module):
     """Single Shot Multibox Architecture
@@ -40,8 +40,9 @@ class SSD(nn.Module):
         self.L2Norm = L2Norm(512, 20)
         self.extras = nn.ModuleList(extras)
 
-        self.loc = nn.ModuleList(head[0])
-        self.conf = nn.ModuleList(head[1])
+        self.header = nn.ModuleList(head)
+        #self.loc = nn.ModuleList(head[0])
+        #self.conf = nn.ModuleList(head[1])
 
         if phase == 'test':
             self.softmax = nn.Softmax(dim=-1)
@@ -89,9 +90,13 @@ class SSD(nn.Module):
                 sources.append(x)
 
         # apply multibox head to source layers
-        for (x, l, c) in zip(sources, self.loc, self.conf):
-            loc.append(l(x).permute(0, 2, 3, 1).contiguous())
-            conf.append(c(x).permute(0, 2, 3, 1).contiguous())
+        #for (x, l, c) in zip(sources, self.loc, self.conf):
+        for (x, h) in zip(sources, self.header):
+            #loc.append(l(x).permute(0, 2, 3, 1).contiguous())
+            #conf.append(c(x).permute(0, 2, 3, 1).contiguous())
+            l, c = h(x)
+            loc.append(l.permute(0, 2, 3, 1).contiguous())
+            conf.append(c.permute(0, 2, 3, 1).contiguous())
 
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
@@ -163,23 +168,85 @@ def add_extras(cfg, i, batch_norm=False):
     return layers
 
 
-def multibox(vgg, extra_layers, cfg, num_classes):
+def multibox(vgg, extra_layers, cfg, num_classes, opt):
+    header = []
     loc_layers = []
     conf_layers = []
     vgg_source = [21, -2]
     for k, v in enumerate(vgg_source):
-        
-        
-        loc_layers += [nn.Conv2d(vgg[v].out_channels,
-                                 cfg[k] * 4, kernel_size=3, padding=1)]
-        conf_layers += [nn.Conv2d(vgg[v].out_channels,
-                        cfg[k] * num_classes, kernel_size=3, padding=1)]
+        header += [DetectionHeader(vgg[v].out_channels, cfg[k], num_classes,
+                                   deformation=opt.deformation,
+                                   kernel_wise_deform=opt.kernel_wise_deform,
+                                   deform_by_input=opt.deform_by_input)]
+        #loc_layers += [nn.Conv2d(vgg[v].out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
+        #conf_layers += [nn.Conv2d(vgg[v].out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
     for k, v in enumerate(extra_layers[1::2], 2):
-        loc_layers += [nn.Conv2d(v.out_channels, cfg[k]
-                                 * 4, kernel_size=3, padding=1)]
-        conf_layers += [nn.Conv2d(v.out_channels, cfg[k]
-                                  * num_classes, kernel_size=3, padding=1)]
-    return vgg, extra_layers, (loc_layers, conf_layers)
+        #loc_layers += [nn.Conv2d(v.out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
+        #conf_layers += [nn.Conv2d(v.out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
+        header += [DetectionHeader(v.out_channels, cfg[k], num_classes,
+                                   deformation=opt.deformation,
+                                   kernel_wise_deform=opt.kernel_wise_deform,
+                                   deform_by_input=opt.deform_by_input)]
+    #return vgg, extra_layers, (loc_layers, conf_layers)
+    return vgg, extra_layers, header
+
+
+class DetectionHeader(nn.Module):
+    def __init__(self, in_channel, ratios, num_classes, ks=3, deformation=False,
+                 kernel_wise_deform=False, deform_by_input=False):
+        super().__init__()
+        self.kernel_wise_deform = kernel_wise_deform
+        self.deform_by_input = deform_by_input
+        self.kernel_size = ks
+        self.deformation = deformation
+
+        self.loc_layers = nn.ModuleList([])
+        for i in range(ratios):
+            self.loc_layers.append(nn.Conv2d(in_channel, 4, kernel_size=3, padding=1))
+
+        if deformation:
+            self.offset_groups = nn.ModuleList([])
+            if deform_by_input:
+                offset_in_channel = in_channel
+            else:
+                offset_in_channel = 4
+            if kernel_wise_deform:
+                deform_depth = 2
+            else:
+                deform_depth = 2 * (ks ** 2)
+            for i in range(ratios):
+                _offset2d = nn.Conv2d(offset_in_channel, deform_depth, kernel_size=ks, padding=1)
+                self.offset_groups.append(_offset2d)
+
+        self.conf_layers = nn.ModuleList([])
+        for i in range(ratios):
+            if deformation:
+                _deform = dcn.DeformConv(in_channel, num_classes, kernel_size=ks, padding=1, bias=False)
+            else:
+                _deform = nn.Conv2d(in_channel, num_classes, kernel_size=3, padding=1)
+            self.conf_layers.append(_deform)
+
+    def forward(self, x, verbose=False):
+        regression = [loc(x) for loc in self.loc_layers]
+        if verbose:
+            print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
+        if self.deformation:
+            if self.deform_by_input:
+                deform_map = [offset(x) for offset in self.offset_groups]
+            else:
+                deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
+            if verbose:
+                print("deform_map shape is composed of %d %s" % (len(deform_map), str(deform_map[0].shape)))
+            if self.kernel_wise_deform:
+                deform_map = [dm.repeat(1, self.kernel_size**2, 1, 1) for dm in deform_map]
+            if verbose:
+                print("deform_map shape is extended to %d %s" % (len(deform_map), str(deform_map[0].shape)))
+            pred = [deform(x, deform_map[i]) for i, deform in enumerate(self.conf_layers)]
+        else:
+            pred = [conf(x) for conf in self.conf_layers]
+        if verbose:
+            print("pred shape is composed of %d %s" % (len(pred), str(pred[0].shape)))
+        return torch.cat(regression, dim=1), torch.cat(pred, dim=1)
 
 
 base = {
@@ -197,7 +264,7 @@ mbox = {
 }
 
 
-def build_ssd(phase, size=300, num_classes=21):
+def build_ssd(opt, phase, size=300, num_classes=21):
     if phase != "test" and phase != "train":
         print("ERROR: Phase: " + phase + " not recognized")
         return
@@ -205,7 +272,7 @@ def build_ssd(phase, size=300, num_classes=21):
         print("ERROR: You specified size " + repr(size) + ". However, " +
               "currently only SSD300 (size=300) is supported!")
         return
-    base_, extras_, head_ = multibox(vgg(base[str(size)], 3),
-                                     add_extras(extras[str(size)], 1024),
-                                     mbox[str(size)], num_classes)
+    base_, extras_, head_ = multibox(vgg=vgg(base[str(size)], 3),
+                                     extra_layers=add_extras(extras[str(size)], 1024),
+                                     cfg=mbox[str(size)], num_classes=num_classes, opt=opt)
     return SSD(phase, size, base_, extras_, head_, num_classes)

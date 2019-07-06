@@ -49,6 +49,13 @@ parser.add_argument('--gamma', default=0.1, type=float,
                     help='Gamma update for SGD')
 parser.add_argument('--visdom', default=False, type=str2bool,
                     help='Use visdom for loss visualization')
+
+parser.add_argument('--deformation', default=False, type=str2bool,
+                    help='use deformation in detection head')
+parser.add_argument('--kernel_wise_deform', default=False, type=str2bool,
+                    help='apply deformation for each pixel in kernel or for the whole kernel')
+parser.add_argument('--deform_by_input', default=False, type=str2bool,
+                    help='use input tensor to infer deformation map or not')
 parser.add_argument('--save_folder', default='weights/',
                     help='Directory for saving checkpoint models')
 args = parser.parse_args()
@@ -92,7 +99,7 @@ def train():
         import visdom
         viz = visdom.Visdom()
 
-    ssd_net = build_ssd('train', cfg['min_dim'], cfg['num_classes'])
+    ssd_net = build_ssd(args, 'train', cfg['min_dim'], cfg['num_classes'])
     net = ssd_net
 
     if args.cuda:
@@ -114,8 +121,9 @@ def train():
         print('Initializing weights...')
         # initialize newly added layers' weights with xavier method
         ssd_net.extras.apply(weights_init)
-        ssd_net.loc.apply(weights_init)
-        ssd_net.conf.apply(weights_init)
+        ssd_net.header.apply(weights_init)
+        #ssd_net.loc.apply(weights_init)
+        #ssd_net.conf.apply(weights_init)
 
     optimizer = optim.Adam(net.parameters(), lr=args.lr, #momentum=args.momentum,
                           weight_decay=args.weight_decay)
