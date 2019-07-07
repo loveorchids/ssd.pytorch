@@ -31,6 +31,8 @@ parser.add_argument('--basenet', default='vgg16_reducedfc.pth',
                     help='Pretrained base model')
 parser.add_argument('--batch_size', default=96, type=int,
                     help='Batch size for training')
+parser.add_argument('--max_iter', default=120000, type=int,
+                    help='iteration times for training')
 parser.add_argument('--resume', default=None, type=str,
                     help='Checkpoint state_dict file to resume training from')
 parser.add_argument('--start_iter', default=0, type=int,
@@ -39,7 +41,7 @@ parser.add_argument('--num_workers', default=6, type=int,
                     help='Number of workers used in dataloading')
 parser.add_argument('--cuda', default=True, type=str2bool,
                     help='Use CUDA to train model')
-parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float,
+parser.add_argument('--lr', '--learning-rate', default=1e-4, type=float,
                     help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float,
                     help='Momentum value for optim')
@@ -47,19 +49,24 @@ parser.add_argument('--weight_decay', default=5e-4, type=float,
                     help='Weight decay for SGD')
 parser.add_argument('--gamma', default=0.1, type=float,
                     help='Gamma update for SGD')
-parser.add_argument('--visdom', default=False, type=str2bool,
+parser.add_argument('--visdom', default=False, type=bool,
                     help='Use visdom for loss visualization')
 
 parser.add_argument('--deformation', default=False, type=str2bool,
                     help='use deformation in detection head')
 parser.add_argument('--kernel_wise_deform', default=False, type=str2bool,
-                    help='apply deformation for each pixel in kernel or for the whole kernel')
+                    help='if True, apply deformation for each pixel in kernel or for the whole kernel')
 parser.add_argument('--deform_by_input', default=False, type=str2bool,
                     help='use input tensor to infer deformation map or not')
 parser.add_argument('--save_folder', default='weights/',
                     help='Directory for saving checkpoint models')
+parser.add_argument('--name', default='SSD',
+                    help='Model name')
 args = parser.parse_args()
 
+if args.visdom:
+    import visdom
+    viz = visdom.Visdom()
 
 if torch.cuda.is_available():
     if args.cuda:
@@ -95,9 +102,7 @@ def train():
                                transform=SSDAugmentation(cfg['min_dim'],
                                                          MEANS))
 
-    if args.visdom:
-        import visdom
-        viz = visdom.Visdom()
+
 
     ssd_net = build_ssd(args, 'train', cfg['min_dim'], cfg['num_classes'])
     net = ssd_net
@@ -156,7 +161,7 @@ def train():
                                   pin_memory=True)
     # create batch iterator
     batch_iterator = iter(data_loader)
-    for iteration in range(args.start_iter, cfg['max_iter']):
+    for iteration in range(args.start_iter, args.max_iter):
         #print("iteration: %s"%iteration)
         if args.visdom and iteration != 0 and (iteration % epoch_size == 0):
             update_vis_plot(epoch, loc_loss, conf_loss, epoch_plot, None,
@@ -205,7 +210,7 @@ def train():
 
         if iteration != 0 and iteration % 5000 == 0:
             print('Saving state, iter:', iteration)
-            torch.save(ssd_net.state_dict(), 'weights/ssd300_COCO_' +
+            torch.save(ssd_net.state_dict(), 'weights/' + args.name + '_300_' +
                        repr(iteration) + '.pth')
     torch.save(ssd_net.state_dict(),
                args.save_folder + '' + args.dataset + '.pth')

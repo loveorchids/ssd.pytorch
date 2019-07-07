@@ -14,7 +14,7 @@ import torch.utils.data as data
 from ssd import build_ssd
 
 parser = argparse.ArgumentParser(description='Single Shot MultiBox Detection')
-parser.add_argument('--trained_model', default='weights/ssd_300_VOC0712.pth',
+parser.add_argument('--trained_model', default='weights/VOC_TT_300_40000.pth',
                     type=str, help='Trained state_dict file path to open')
 parser.add_argument('--save_folder', default='eval/', type=str,
                     help='Dir to save results')
@@ -24,6 +24,15 @@ parser.add_argument('--cuda', default=True, type=bool,
                     help='Use cuda to train model')
 parser.add_argument('--voc_root', default=VOC_ROOT, help='Location of VOC root directory')
 parser.add_argument('-f', default=None, type=str, help="Dummy arg so we can load in Jupyter Notebooks")
+
+parser.add_argument('--deformation', default=True, type=bool,
+                    help='use deformation in detection head')
+parser.add_argument('--kernel_wise_deform', default=False, type=bool,
+                    help='if True, apply deformation for each pixel in kernel or for the whole kernel')
+parser.add_argument('--deform_by_input', default=False, type=bool,
+                    help='use input tensor to infer deformation map or not')
+parser.add_argument('--name', default='SSD',
+                    help='Model name')
 args = parser.parse_args()
 
 if args.cuda and torch.cuda.is_available():
@@ -79,7 +88,8 @@ def test_net(save_folder, net, cuda, testset, transform, thresh):
 def test_voc():
     # load net
     num_classes = len(VOC_CLASSES) + 1 # +1 background
-    net = build_ssd('test', 300, num_classes) # initialize SSD
+    #net = build_ssd('test', 300, num_classes) # initialize SSD
+    net = build_ssd(args, 'test', 300, num_classes)
     net.load_state_dict(torch.load(args.trained_model))
     net.eval()
     print('Finished loading model!')

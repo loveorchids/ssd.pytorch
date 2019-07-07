@@ -36,8 +36,12 @@ def str2bool(v):
 parser = argparse.ArgumentParser(
     description='Single Shot MultiBox Detector Evaluation')
 parser.add_argument('--trained_model',
-                    default='weights/ssd300_COCO_40000.pth', type=str,
+                    default='weights/', type=str,
                     help='Trained state_dict file path to open')
+parser.add_argument('--iter', default=40000, type=int,
+                    help='num of trained iterations')
+parser.add_argument('--size', default=300, type=int,
+                    help='input image size of SSD')
 parser.add_argument('--save_folder', default='eval/', type=str,
                     help='File path to save results')
 parser.add_argument('--confidence_threshold', default=0.01, type=float,
@@ -50,6 +54,15 @@ parser.add_argument('--voc_root', default=VOC_ROOT,
                     help='Location of VOC root directory')
 parser.add_argument('--cleanup', default=True, type=str2bool,
                     help='Cleanup and remove results files following eval')
+
+parser.add_argument('--deformation', default=False, type=str2bool,
+                    help='use deformation in detection head')
+parser.add_argument('--kernel_wise_deform', default=False, type=str2bool,
+                    help='if True, apply deformation for each pixel in kernel or for the whole kernel')
+parser.add_argument('--deform_by_input', default=False, type=str2bool,
+                    help='use input tensor to infer deformation map or not')
+parser.add_argument('--name', default='SSD',
+                    help='Model name')
 
 args = parser.parse_args()
 
@@ -73,7 +86,7 @@ imgsetpath = os.path.join(args.voc_root, 'VOC2007', 'ImageSets',
 YEAR = '2007'
 devkit_path = args.voc_root + 'VOC' + YEAR
 dataset_mean = (104, 117, 123)
-set_type = 'val'
+set_type = 'test'
 
 
 class Timer(object):
@@ -257,7 +270,7 @@ cachedir: Directory for caching the annotations
 # first load gt
     if not os.path.isdir(cachedir):
         os.mkdir(cachedir)
-    cachefile = os.path.join(cachedir, 'annots.pkl')
+    cachefile = os.path.join(cachedir, '%s_annots.pkl'%set_type)
     # read list of images
     with open(imagesetfile, 'r') as f:
         lines = f.readlines()
@@ -372,8 +385,11 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
 
     # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
-    output_dir = get_output_dir('ssd300_120000', set_type)
-    det_file = os.path.join(output_dir, 'detections.pkl')
+    output_dir = os.path.join(os.getcwd(), "experiments", args.name)
+    if not os.path.exists(output_dir):
+        os.mkdir(output_dir)
+    det_file = os.path.join(output_dir, 'detections_%s.pkl'%args.iter)
+    progress = open(os.path.join(output_dir, "time_consumption_%s.txt"%args.iter), "w")
 
     for i in range(num_images):
         im, gt, h, w = dataset.pull_item(i)
@@ -402,10 +418,11 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
                                   scores[:, np.newaxis])).astype(np.float32,
                                                                  copy=False)
             all_boxes[j][i] = cls_dets
+        result = 'im_detect: {:d}/{:d} {:.3f}s'.format(i + 1, num_images, detect_time)
+        progress.write(result)
+        print(result)
 
-        print('im_detect: {:d}/{:d} {:.3f}s'.format(i + 1,
-                                                    num_images, detect_time))
-
+    progress.close()
     with open(det_file, 'wb') as f:
         pickle.dump(all_boxes, f, pickle.HIGHEST_PROTOCOL)
 
@@ -421,8 +438,10 @@ def evaluate_detections(box_list, output_dir, dataset):
 if __name__ == '__main__':
     # load net
     num_classes = len(labelmap) + 1                      # +1 for background
-    net = build_ssd(args, 'test', 300, num_classes)            # initialize SSD
-    net.load_state_dict(torch.load(args.trained_model))
+    net = build_ssd(args, 'test', 300, num_classes)
+    # initialize SSD
+    model_name = "%s_%s_%s.pth"%(args.name, args.size, args.iter)
+    net.load_state_dict(torch.load(args.trained_model + model_name))
     net.eval()
     print('Finished loading model!')
     # load data

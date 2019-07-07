@@ -183,8 +183,7 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
     for k, v in enumerate(extra_layers[1::2], 2):
         #loc_layers += [nn.Conv2d(v.out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
         #conf_layers += [nn.Conv2d(v.out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
-        header += [DetectionHeader(v.out_channels, cfg[k], num_classes,
-                                   deformation=opt.deformation,
+        header += [DetectionHeader(v.out_channels, cfg[k], num_classes, deformation=False,
                                    kernel_wise_deform=opt.kernel_wise_deform,
                                    deform_by_input=opt.deform_by_input)]
     #return vgg, extra_layers, (loc_layers, conf_layers)
