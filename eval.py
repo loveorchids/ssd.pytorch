@@ -435,9 +435,9 @@ def evaluate_detections(box_list, output_dir, dataset):
     do_python_eval(output_dir)
 
 
-def visualize_deformation(cfg, img, deform_pyramid):
-    h = img.size(2)
-    w = img.size(3)
+def visualize_deformation(cfg, img_tensor, deform_pyramid):
+    h = img_tensor.size(2)
+    w = img_tensor.size(3)
     fm_size = cfg['feature_maps'][:len(deform_pyramid)]
     for i, deform_maps in enumerate(deform_pyramid):
         # get deformation maps at different scale
@@ -445,9 +445,19 @@ def visualize_deformation(cfg, img, deform_pyramid):
             # get deformation maps for different ratio
             d_x = torch.mean(deform[:, 0::2, :, :], dim=1).unsqueeze(1)
             d_y = torch.mean(deform[:, 1::2, :, :], dim=1).unsqueeze(1)
-            dm = torch.cat([d_x, d_y], dim=1)
-            for batch in range(dm.size(0)):
-                x1 = []
+            deform = torch.cat([d_x, d_y], dim=1)
+            for batch in range(deform.size(0)):
+                img = img_tensor[i].permute(1, 2, 0).data.numpy()
+                dm = deform[i].view(2, -1).permute(1, 0).numpy()
+                idx = [int(round(num))
+                       for num in np.linspace(h/fm_size[i], h, fm_size[i] + 1)][:-1]
+                assert dm.shape[1] == len(idx) ** 2
+                x_coords = idx * len(idx)
+                y_coords = [val for val in idx for _ in idx]
+                start = [(y_coords[_], x) for _, x in x_coords]
+                for j, (y1, x1) in enumerate(start):
+                    # draw deformation direction for each location
+                    cv2.line(img, (x1, y1), (x1 + dm[j, 1], y + dm[j, 0]), (255, 0, 0), 1)
 
 
 
