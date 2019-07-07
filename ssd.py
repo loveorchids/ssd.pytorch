@@ -48,7 +48,7 @@ class SSD(nn.Module):
             self.softmax = nn.Softmax(dim=-1)
             self.detect = Detect(num_classes, 0, 200, 0.01, 0.45)
 
-    def forward(self, x):
+    def forward(self, x, deform_map=False):
         """Applies network layers and ops on input image(s) x.
 
         Args:
@@ -70,6 +70,7 @@ class SSD(nn.Module):
         sources = list()
         loc = list()
         conf = list()
+        deform = list()
 
         # apply vgg up to conv4_3 relu
         for k in range(23):
@@ -94,7 +95,11 @@ class SSD(nn.Module):
         for (x, h) in zip(sources, self.header):
             #loc.append(l(x).permute(0, 2, 3, 1).contiguous())
             #conf.append(c(x).permute(0, 2, 3, 1).contiguous())
-            l, c = h(x)
+            if deform_map:
+                l, c, d = h(x, deform_map=deform_map)
+                deform.append(d)
+            else:
+                l, c = h(x, deform_map=deform_map)
             loc.append(l.permute(0, 2, 3, 1).contiguous())
             conf.append(c.permute(0, 2, 3, 1).contiguous())
 
@@ -113,7 +118,10 @@ class SSD(nn.Module):
                 conf.view(conf.size(0), -1, self.num_classes),
                 self.priors
             )
-        return output
+        if deform_map:
+            return output, deform
+        else:
+            return output
 
     def load_weights(self, base_file):
         other, ext = os.path.splitext(base_file)
@@ -225,7 +233,7 @@ class DetectionHeader(nn.Module):
                 _deform = nn.Conv2d(in_channel, num_classes, kernel_size=3, padding=1)
             self.conf_layers.append(_deform)
 
-    def forward(self, x, verbose=False):
+    def forward(self, x, verbose=False, deform_map=False):
         regression = [loc(x) for loc in self.loc_layers]
         if verbose:
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
@@ -245,7 +253,10 @@ class DetectionHeader(nn.Module):
             pred = [conf(x) for conf in self.conf_layers]
         if verbose:
             print("pred shape is composed of %d %s" % (len(pred), str(pred[0].shape)))
-        return torch.cat(regression, dim=1), torch.cat(pred, dim=1)
+        if deform_map:
+            return torch.cat(regression, dim=1), torch.cat(pred, dim=1), deform_map
+        else:
+            return torch.cat(regression, dim=1), torch.cat(pred, dim=1)
 
 
 base = {
