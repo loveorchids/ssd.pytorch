@@ -458,6 +458,7 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid):
                 for j, (y1, x1) in enumerate(start):
                     # draw deformation direction for each location
                     cv2.line(img, (x1, y1), (x1 + dm[j, 1], y1 + dm[j, 0]), (255, 0, 0), 1)
+                # Save img
 
 
 
