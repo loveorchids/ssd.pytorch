@@ -25,7 +25,7 @@ class SSD(nn.Module):
         head: "multibox head" consists of loc and conf conv layers
     """
 
-    def __init__(self, phase, size, base, extras, head, num_classes):
+    def __init__(self, args, phase, size, base, extras, head, num_classes):
         super(SSD, self).__init__()
         self.phase = phase
         self.num_classes = num_classes
@@ -33,16 +33,18 @@ class SSD(nn.Module):
         self.priorbox = PriorBox(self.cfg)
         self.priors = Variable(self.priorbox.forward())
         self.size = size
-
+        self.args = args
         # SSD network
         self.vgg = nn.ModuleList(base)
         # Layer learns to scale the l2 normalized features from conv4_3
         self.L2Norm = L2Norm(512, 20)
         self.extras = nn.ModuleList(extras)
 
-        self.header = nn.ModuleList(head)
-        #self.loc = nn.ModuleList(head[0])
-        #self.conf = nn.ModuleList(head[1])
+        if args.implementation == "header":
+            self.header = nn.ModuleList(head)
+        elif args.implementation == "vanilla":
+            self.loc = nn.ModuleList(head[0])
+            self.conf = nn.ModuleList(head[1])
 
         if phase == 'test':
             self.softmax = nn.Softmax(dim=-1)
@@ -91,17 +93,19 @@ class SSD(nn.Module):
                 sources.append(x)
 
         # apply multibox head to source layers
-        #for (x, l, c) in zip(sources, self.loc, self.conf):
-        for (x, h) in zip(sources, self.header):
-            #loc.append(l(x).permute(0, 2, 3, 1).contiguous())
-            #conf.append(c(x).permute(0, 2, 3, 1).contiguous())
-            if deform_map:
-                l, c, d = h(x, deform_map=deform_map)
-                deform.append(d)
-            else:
-                l, c = h(x, deform_map=deform_map)
-            loc.append(l.permute(0, 2, 3, 1).contiguous())
-            conf.append(c.permute(0, 2, 3, 1).contiguous())
+        if self.args.implementation == "header":
+            for (x, h) in zip(sources, self.header):
+                if deform_map:
+                    l, c, d = h(x, deform_map=deform_map)
+                    deform.append(d)
+                else:
+                    l, c = h(x, deform_map=deform_map)
+                loc.append(l.permute(0, 2, 3, 1).contiguous())
+                conf.append(c.permute(0, 2, 3, 1).contiguous())
+        elif self.args.implementation == "vanilla":
+            for (x, l, c) in zip(sources, self.loc, self.conf):
+                loc.append(l(x).permute(0, 2, 3, 1).contiguous())
+                conf.append(c(x).permute(0, 2, 3, 1).contiguous())
 
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
@@ -181,21 +185,26 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
     loc_layers = []
     conf_layers = []
     vgg_source = [21, -2]
-    for k, v in enumerate(vgg_source):
-        header += [DetectionHeader(vgg[v].out_channels, cfg[k], num_classes,
-                                   deformation=opt.deformation,
-                                   kernel_wise_deform=opt.kernel_wise_deform,
-                                   deform_by_input=opt.deform_by_input)]
-        #loc_layers += [nn.Conv2d(vgg[v].out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
-        #conf_layers += [nn.Conv2d(vgg[v].out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
-    for k, v in enumerate(extra_layers[1::2], 2):
-        #loc_layers += [nn.Conv2d(v.out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
-        #conf_layers += [nn.Conv2d(v.out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
-        header += [DetectionHeader(v.out_channels, cfg[k], num_classes, deformation=False,
-                                   kernel_wise_deform=opt.kernel_wise_deform,
-                                   deform_by_input=opt.deform_by_input)]
-    #return vgg, extra_layers, (loc_layers, conf_layers)
-    return vgg, extra_layers, header
+
+    if opt.implementation == "header":
+        for k, v in enumerate(vgg_source):
+            header += [DetectionHeader(vgg[v].out_channels, cfg[k], num_classes,
+                                       deformation=opt.deformation,
+                                       kernel_wise_deform=opt.kernel_wise_deform,
+                                       deform_by_input=opt.deform_by_input)]
+        for k, v in enumerate(extra_layers[1::2], 2):
+            header += [DetectionHeader(v.out_channels, cfg[k], num_classes, deformation=False,
+                                       kernel_wise_deform=opt.kernel_wise_deform,
+                                       deform_by_input=opt.deform_by_input)]
+        return vgg, extra_layers, header
+    elif opt.implementation == "vanilla":
+        for k, v in enumerate(vgg_source):
+            loc_layers += [nn.Conv2d(vgg[v].out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
+            conf_layers += [nn.Conv2d(vgg[v].out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
+        for k, v in enumerate(extra_layers[1::2], 2):
+            loc_layers += [nn.Conv2d(v.out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
+            conf_layers += [nn.Conv2d(v.out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
+        return vgg, extra_layers, (loc_layers, conf_layers)
 
 
 class DetectionHeader(nn.Module):
@@ -285,4 +294,4 @@ def build_ssd(opt, phase, size=300, num_classes=21):
     base_, extras_, head_ = multibox(vgg=vgg(base[str(size)], 3),
                                      extra_layers=add_extras(extras[str(size)], 1024),
                                      cfg=mbox[str(size)], num_classes=num_classes, opt=opt)
-    return SSD(phase, size, base_, extras_, head_, num_classes)
+    return SSD(opt, phase, size, base_, extras_, head_, num_classes)

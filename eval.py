@@ -40,7 +40,7 @@ parser.add_argument('--trained_model',
                     help='Trained state_dict file path to open')
 parser.add_argument('--iter', default=40000, type=int,
                     help='num of trained iterations')
-parser.add_argument('--size', default=300, type=int,
+parser.add_argument('--size', default="300", type=str,
                     help='input image size of SSD')
 parser.add_argument('--save_folder', default='eval/', type=str,
                     help='File path to save results')
