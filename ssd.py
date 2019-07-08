@@ -31,7 +31,7 @@ class SSD(nn.Module):
         self.num_classes = num_classes
         self.cfg = (coco, voc)[num_classes == 21]
         self.priorbox = PriorBox(self.cfg)
-        self.priors = Variable(self.priorbox.forward(), volatile=True)
+        self.priors = Variable(self.priorbox.forward())
         self.size = size
 
         # SSD network
@@ -46,7 +46,7 @@ class SSD(nn.Module):
 
         if phase == 'test':
             self.softmax = nn.Softmax(dim=-1)
-            self.detect = Detect(num_classes, 0, 200, 0.01, 0.45)
+            self.detect = Detect(num_classes, bkg_label=0, top_k=200, conf_thresh=0.1, nms_thresh=0.45)
 
     def forward(self, x, deform_map=False):
         """Applies network layers and ops on input image(s) x.

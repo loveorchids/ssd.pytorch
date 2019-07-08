@@ -46,8 +46,8 @@ parser.add_argument('--save_folder', default='eval/', type=str,
                     help='File path to save results')
 parser.add_argument('--confidence_threshold', default=0.01, type=float,
                     help='Detection confidence threshold')
-parser.add_argument('--top_k', default=5, type=int,
-                    help='Further restrict the number of predictions to parse')
+#parser.add_argument('--top_k', default=5, type=int,
+                    #help='Further restrict the number of predictions to parse')
 parser.add_argument('--cuda', default=True, type=str2bool,
                     help='Use cuda to train model')
 parser.add_argument('--voc_root', default=VOC_ROOT,
@@ -61,8 +61,14 @@ parser.add_argument('--kernel_wise_deform', default=False, type=str2bool,
                     help='if True, apply deformation for each pixel in kernel or for the whole kernel')
 parser.add_argument('--deform_by_input', default=False, type=str2bool,
                     help='use input tensor to infer deformation map or not')
-parser.add_argument('--name', default='SSD',
-                    help='Model name')
+
+parser.add_argument( "--top_k", type=int, help="detector top_k", default=200)
+parser.add_argument("--conf_threshold",type=float,help="detector_conf_threshold",default=0.01)
+parser.add_argument("--nms_threshold", type=float, help="detector_nms_threshold", default=0.45)
+
+parser.add_argument('--name', default='SSD', type=str, help='Model name')
+parser.add_argument('--year', default=2007, type=int, help='which set to test')
+parser.add_argument('--phase', default='test', type=str, help='which set to test')
 
 args = parser.parse_args()
 
@@ -83,10 +89,12 @@ annopath = os.path.join(args.voc_root, 'VOC2007', 'Annotations', '%s.xml')
 imgpath = os.path.join(args.voc_root, 'VOC2007', 'JPEGImages', '%s.jpg')
 imgsetpath = os.path.join(args.voc_root, 'VOC2007', 'ImageSets',
                           'Main', '{:s}.txt')
-YEAR = '2007'
+YEAR = str(args.year)
 devkit_path = args.voc_root + 'VOC' + YEAR
 dataset_mean = (104, 117, 123)
-set_type = 'test'
+set_type = args.phase
+print("")
+print("Evaluation on %s set: %s."%(set_type, devkit_path))
 
 
 class Timer(object):
@@ -389,9 +397,13 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
     det_file = os.path.join(output_dir, 'detections_%s.pkl'%args.iter)
-    progress = open(os.path.join(output_dir, "time_consumption_%s.txt"%args.iter), "w")
+    #progress = open(os.path.join(output_dir, "time_consumption_%s.txt"%args.iter), "w")
 
+    start = time.time()
     for i in range(num_images):
+        if i != 0 and i % 500 == 0:
+            print("progress: %s/%s cost %.4f seconds."%(i, num_images, time.time() - start))
+            start = time.time()
         im, gt, h, w = dataset.pull_item(i)
 
         x = Variable(im.unsqueeze(0))
@@ -399,7 +411,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             x = x.cuda()
         _t['im_detect'].tic()
         detections = net(x).data
-        detect_time = _t['im_detect'].toc(average=False)
+        #detect_time = _t['im_detect'].toc(average=False)
 
         # skip j = 0, because it's the background class
         for j in range(1, detections.size(1)):
@@ -418,11 +430,11 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
                                   scores[:, np.newaxis])).astype(np.float32,
                                                                  copy=False)
             all_boxes[j][i] = cls_dets
-        result = 'im_detect: {:d}/{:d} {:.3f}s'.format(i + 1, num_images, detect_time)
-        progress.write(result)
-        print(result)
+        #result = 'im_detect: {:d}/{:d} {:.3f}s'.format(i + 1, num_images, detect_time)
+        #progress.write(result)
+        #print(result)
 
-    progress.close()
+    #progress.close()
     with open(det_file, 'wb') as f:
         pickle.dump(all_boxes, f, pickle.HIGHEST_PROTOCOL)
 
@@ -468,7 +480,9 @@ if __name__ == '__main__':
     net = build_ssd(args, 'test', 300, num_classes)
     # initialize SSD
     model_name = "%s_%s_%s.pth"%(args.name, args.size, args.iter)
-    net.load_state_dict(torch.load(args.trained_model + model_name))
+    print("Evaluation on model: %s"%model_name)
+    pretrained_weight = torch.load(args.trained_model + model_name)
+    net.load_state_dict(pretrained_weight)
     net.eval()
     print('Finished loading model!')
     # load data
