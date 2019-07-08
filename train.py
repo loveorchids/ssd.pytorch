@@ -60,7 +60,7 @@ parser.add_argument('--deformation', default=False, type=str2bool,
                     help='use deformation in detection head')
 parser.add_argument('--kernel_wise_deform', default=False, type=str2bool,
                     help='if True, apply deformation for each pixel in kernel or for the whole kernel')
-parser.add_argument('--deform_by_input', default=False, type=str2bool,
+parser.add_argument('--deformation_source', default=False, type=str2bool,
                     help='use input tensor to infer deformation map or not')
 parser.add_argument('--save_folder', default='weights/',
                     help='Directory for saving checkpoint models')

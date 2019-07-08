@@ -192,11 +192,15 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
             header += [DetectionHeader(vgg[v].out_channels, cfg[k], num_classes,
                                        deformation=opt.deformation,
                                        kernel_wise_deform=opt.kernel_wise_deform,
-                                       deform_by_input=opt.deform_by_input)]
+                                       deformation_source=opt.deformation_source)]
         for k, v in enumerate(extra_layers[1::2], 2):
+            #if k <= 4:
+                #_deform = True
+            #else:
+                #_deform = False
             header += [DetectionHeader(v.out_channels, cfg[k], num_classes, deformation=False,
                                        kernel_wise_deform=opt.kernel_wise_deform,
-                                       deform_by_input=opt.deform_by_input)]
+                                       deformation_source=opt.deformation_source)]
         return vgg, extra_layers, header
     elif opt.implementation == "vanilla":
         for k, v in enumerate(vgg_source):
@@ -210,10 +214,10 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
 
 class DetectionHeader(nn.Module):
     def __init__(self, in_channel, ratios, num_classes, ks=3, deformation=False,
-                 kernel_wise_deform=False, deform_by_input=False):
+                 kernel_wise_deform=False, deformation_source="concate"):
         super().__init__()
         self.kernel_wise_deform = kernel_wise_deform
-        self.deform_by_input = deform_by_input
+        self.deformation_source = deformation_source
         self.kernel_size = ks
         self.deformation = deformation
 
@@ -223,10 +227,15 @@ class DetectionHeader(nn.Module):
 
         if deformation:
             self.offset_groups = nn.ModuleList([])
-            if deform_by_input:
+            if deformation_source.lower() == "input":
                 offset_in_channel = in_channel
-            else:
+            elif deformation_source.lower() == "regression":
                 offset_in_channel = 4
+            elif deformation_source.lower() == "concate":
+                # TODO: implement
+                raise NotImplementedError()
+            else:
+                raise NotImplementedError()
             if kernel_wise_deform:
                 deform_depth = 2
             else:
@@ -248,7 +257,7 @@ class DetectionHeader(nn.Module):
         if verbose:
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
         if self.deformation:
-            if self.deform_by_input:
+            if self.deformation_source:
                 _deform_map = [offset(x) for offset in self.offset_groups]
             else:
                 _deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
@@ -261,6 +270,7 @@ class DetectionHeader(nn.Module):
             pred = [deform(x, _deform_map[i]) for i, deform in enumerate(self.conf_layers)]
         else:
             pred = [conf(x) for conf in self.conf_layers]
+            _deform_map = None
         if verbose:
             print("pred shape is composed of %d %s" % (len(pred), str(pred[0].shape)))
         if deform_map:

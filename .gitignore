@@ -130,3 +130,6 @@ data/ssd_dataloader.py
 # project
 weights/
 data/VOCdevkit/
+eval
+.ipynb_checkpoints
+*.sh

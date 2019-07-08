@@ -29,7 +29,7 @@ parser.add_argument('--deformation', default=True, type=bool,
                     help='use deformation in detection head')
 parser.add_argument('--kernel_wise_deform', default=False, type=bool,
                     help='if True, apply deformation for each pixel in kernel or for the whole kernel')
-parser.add_argument('--deform_by_input', default=False, type=bool,
+parser.add_argument('--deformation_source', default=False, type=bool,
                     help='use input tensor to infer deformation map or not')
 parser.add_argument('--name', default='SSD',
                     help='Model name')

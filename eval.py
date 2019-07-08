@@ -11,7 +11,9 @@ import torch.backends.cudnn as cudnn
 from torch.autograd import Variable
 from data import VOC_ROOT, VOCAnnotationTransform, VOCDetection, BaseTransform
 from data import VOC_CLASSES as labelmap
+from data import voc, coco
 import torch.utils.data as data
+from PIL import Image, ImageDraw
 
 from ssd import build_ssd
 
@@ -52,6 +54,8 @@ parser.add_argument('--confidence_threshold', default=0.01, type=float,
                     #help='Further restrict the number of predictions to parse')
 parser.add_argument('--cuda', default=True, type=str2bool,
                     help='Use cuda to train model')
+parser.add_argument('--cuda_id', default=2, type=int,
+                    help='device id of test')
 parser.add_argument('--voc_root', default=VOC_ROOT,
                     help='Location of VOC root directory')
 parser.add_argument('--cleanup', default=True, type=str2bool,
@@ -61,7 +65,7 @@ parser.add_argument('--deformation', default=False, type=str2bool,
                     help='use deformation in detection head')
 parser.add_argument('--kernel_wise_deform', default=False, type=str2bool,
                     help='if True, apply deformation for each pixel in kernel or for the whole kernel')
-parser.add_argument('--deform_by_input', default=False, type=str2bool,
+parser.add_argument('--deformation_source', default=False, type=str2bool,
                     help='use input tensor to infer deformation map or not')
 
 parser.add_argument( "--top_k", type=int, help="detector top_k", default=200)
@@ -412,7 +416,10 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         if args.cuda:
             x = x.cuda()
         _t['im_detect'].tic()
-        detections = net(x).data
+        #detections = net(x).data
+        detections, deform_pyramid = net(x, deform_map=True)
+        detections = detections.data
+        visualize_deformation(voc, x, deform_pyramid, i)
         #detect_time = _t['im_detect'].toc(average=False)
 
         # skip j = 0, because it's the background class
@@ -449,52 +456,80 @@ def evaluate_detections(box_list, output_dir, dataset):
     do_python_eval(output_dir)
 
 
-def visualize_deformation(cfg, img_tensor, deform_pyramid):
-    h = img_tensor.size(2)
-    w = img_tensor.size(3)
+def visualize_deformation(cfg, img_tensor, deform_pyramid, idx, width=1):
+    path = os.path.expanduser("~/Pictures/deform_vis")
+    height = img_tensor.size(2)
+    width = img_tensor.size(3)
     fm_size = cfg['feature_maps'][:len(deform_pyramid)]
+    # get deformation maps at different scale
     for i, deform_maps in enumerate(deform_pyramid):
-        # get deformation maps at different scale
+        if deform_maps is None:
+            break
+        # get deformation maps for different ratio
+        per_ratio = []
         for deform in deform_maps:
-            # get deformation maps for different ratio
             d_x = torch.mean(deform[:, 0::2, :, :], dim=1).unsqueeze(1)
             d_y = torch.mean(deform[:, 1::2, :, :], dim=1).unsqueeze(1)
             deform = torch.cat([d_x, d_y], dim=1)
-            for batch in range(deform.size(0)):
-                img = img_tensor[i].permute(1, 2, 0).data.numpy()
-                dm = deform[i].view(2, -1).permute(1, 0).numpy()
-                idx = [int(round(num))
-                       for num in np.linspace(h/fm_size[i], h, fm_size[i] + 1)][:-1]
-                assert dm.shape[1] == len(idx) ** 2
-                x_coords = idx * len(idx)
-                y_coords = [val for val in idx for _ in idx]
-                start = [(y_coords[_], x) for _, x in x_coords]
-                for j, (y1, x1) in enumerate(start):
-                    # draw deformation direction for each location
-                    cv2.line(img, (x1, y1), (x1 + dm[j, 1], y1 + dm[j, 0]), (255, 0, 0), 1)
-                # Save img
+            # Get img data and convert to PIL Image
+            per_batch = []
+            for j in range(deform.size(0)):
+                img = img_tensor[j].permute(1, 2, 0).data.cpu().numpy()
+                # Convert to numpy and RGB form
+                img = ((img - np.min(img)) / (np.max(img) - np.min(img)) * 255).astype("uint8")[:, :, (2, 1, 0)].copy()
+                #img = Image.fromarray(img)
+                #draw = ImageDraw.Draw(img)
+                dm = deform[j].view(2, -1).data.permute(1, 0).cpu().numpy()
+                idx_x = [int(round(num))
+                         for num in np.linspace(width / fm_size[i], width, fm_size[i] + 1)][:-1]
+                idx_y = [int(round(num))
+                         for num in np.linspace(height / fm_size[i], height, fm_size[i] + 1)][:-1]
+                assert dm.shape[0] == len(idx_x) * len(idx_y)
+                x_coords = idx_x * len(idx_y)
+                y_coords = [val for val in idx_y for _ in idx_x]
+                #coords = []
+                for k, x in enumerate(x_coords):
+                    img = cv2.line(img, (x, y_coords[k]), (int(round(x + dm[k, 1])), int(round(y_coords[k] + dm[k, 0]))),
+                                   (0, 0, 255), 1)
+                    # append start point
+                    #coords.append((y_coords[k], x))
+                    # append end point
+                    #coords.append()
+                #draw.line(coords, fill=(0, 0, 255), width=width)
+                per_batch.append(img)
+            per_ratio.append(per_batch)
+        per_ratio = list(map(list, zip(*per_ratio)))
+        for batch_id, ratio in enumerate(per_ratio):
+            img = np.concatenate(ratio, axis=1)
+            name = "dm_%d_%d_fm_%s.jpg"%(idx, batch_id, fm_size[i])
+            cv2.imwrite(os.path.join(path, name), img)
+    
 
 
 
 if __name__ == '__main__':
     # load net
-    num_classes = len(labelmap) + 1                      # +1 for background
-    net = build_ssd(args, 'test', 300, num_classes)
-    # initialize SSD
-    model_name = "%s_%s_%s.pth"%(args.name, args.size, args.iter)
-    print("Evaluation on model: %s"%model_name)
-    pretrained_weight = torch.load(args.trained_model + model_name)
-    net.load_state_dict(pretrained_weight)
-    net.eval()
-    print('Finished loading model!')
-    # load data
-    dataset = VOCDetection(args.voc_root, [('2007', set_type)],
-                           BaseTransform(300, dataset_mean),
-                           VOCAnnotationTransform())
-    if args.cuda:
-        net = net.cuda()
-        cudnn.benchmark = True
-    # evaluation
-    test_net(args.save_folder, net, args.cuda, dataset,
-             BaseTransform(net.size, dataset_mean), args.top_k, 300,
-             thresh=args.confidence_threshold)
+    if args.cuda_id >= torch.cuda.device_count():
+        print("argument --cuda_id is larger than the cuda")
+        args.cuda_id = 0
+    with torch.cuda.device(args.cuda_id):
+        num_classes = len(labelmap) + 1                      # +1 for background
+        net = build_ssd(args, 'test', 300, num_classes)
+        # initialize SSD
+        model_name = "%s_%s_%s.pth"%(args.name, args.size, args.iter)
+        print("Evaluation on model: %s"%model_name)
+        pretrained_weight = torch.load(args.trained_model + model_name)
+        net.load_state_dict(pretrained_weight)
+        net.eval()
+        print('Finished loading model!')
+        # load data
+        dataset = VOCDetection(args.voc_root, [('2007', set_type)],
+                               BaseTransform(300, dataset_mean),
+                               VOCAnnotationTransform())
+        if args.cuda:
+            net = net.cuda()
+            cudnn.benchmark = True
+        # evaluation
+        test_net(args.save_folder, net, args.cuda, dataset,
+                 BaseTransform(net.size, dataset_mean), args.top_k, 300,
+                 thresh=args.confidence_threshold)
