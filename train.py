@@ -23,7 +23,7 @@ def str2bool(v):
 parser = argparse.ArgumentParser(
     description='Single Shot MultiBox Detector Training With Pytorch')
 train_set = parser.add_mutually_exclusive_group()
-parser.add_argument('-impl', '--implementation', default="new", type=str,
+parser.add_argument('-impl', '--implementation', default="header", type=str,
                     help='ways of implementation')
 parser.add_argument('--dataset', default='VOC', choices=['VOC', 'COCO'],
                     type=str, help='VOC or COCO')
@@ -33,7 +33,7 @@ parser.add_argument('--basenet', default='vgg16_reducedfc.pth',
                     help='Pretrained base model')
 parser.add_argument('--batch_size', default=96, type=int,
                     help='Batch size for training')
-parser.add_argument('--max_iter', default=120000, type=int,
+parser.add_argument('--max_iter', default=20010, type=int,
                     help='iteration times for training')
 parser.add_argument('--resume', default=None, type=str,
                     help='Checkpoint state_dict file to resume training from')
@@ -59,9 +59,9 @@ parser.add_argument('--visdom', default=False, type=bool,
 parser.add_argument('--deformation', default=False, type=str2bool,
                     help='use deformation in detection head')
 parser.add_argument('--kernel_wise_deform', default=False, type=str2bool,
-                    help='if True, apply deformation for each pixel in kernel or for the whole kernel')
-parser.add_argument('--deformation_source', default=False, type=str2bool,
-                    help='use input tensor to infer deformation map or not')
+                    help='if True, apply deformation for each pixel in kernel')
+parser.add_argument('--deformation_source', default='concate', type=str,
+                    help='the source tensor to generate deformation tensor')
 parser.add_argument('--save_folder', default='weights/',
                     help='Directory for saving checkpoint models')
 parser.add_argument('--name', default='SSD',
@@ -217,7 +217,7 @@ def train():
             update_vis_plot(iteration, loss_l.data, loss_c.data,
                             iter_plot, epoch_plot, 'append')
 
-        if iteration != 0 and iteration % 5000 == 0:
+        if iteration != 0 and iteration % 2000 == 0:
             print('Saving state, iter:', iteration)
             torch.save(ssd_net.state_dict(), 'weights/' + args.name + '_300_' +
                        repr(iteration) + '.pth')

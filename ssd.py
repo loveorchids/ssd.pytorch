@@ -194,10 +194,10 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
                                        kernel_wise_deform=opt.kernel_wise_deform,
                                        deformation_source=opt.deformation_source)]
         for k, v in enumerate(extra_layers[1::2], 2):
-            #if k <= 4:
-                #_deform = True
-            #else:
-                #_deform = False
+            if k <= 4:
+                _deform = True
+            else:
+                _deform = False
             header += [DetectionHeader(v.out_channels, cfg[k], num_classes, deformation=False,
                                        kernel_wise_deform=opt.kernel_wise_deform,
                                        deformation_source=opt.deformation_source)]
@@ -228,12 +228,13 @@ class DetectionHeader(nn.Module):
         if deformation:
             self.offset_groups = nn.ModuleList([])
             if deformation_source.lower() == "input":
+                # Previous version, represent deformation_source is True
                 offset_in_channel = in_channel
             elif deformation_source.lower() == "regression":
+                # Previous version, represent deformation_source is False
                 offset_in_channel = 4
             elif deformation_source.lower() == "concate":
-                # TODO: implement
-                raise NotImplementedError()
+                offset_in_channel = in_channel + 4
             else:
                 raise NotImplementedError()
             if kernel_wise_deform:
@@ -257,10 +258,15 @@ class DetectionHeader(nn.Module):
         if verbose:
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
         if self.deformation:
-            if self.deformation_source:
+            if self.deformation_source.lower() == "input":
                 _deform_map = [offset(x) for offset in self.offset_groups]
-            else:
+            elif self.deformation_source.lower() == "regression":
                 _deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
+            elif self.deformation_source.lower() == "concate":
+                # TODO: reimplement forward graph
+                raise NotImplementedError()
+            else:
+                raise NotImplementedError()
             if verbose:
                 print("deform_map shape is composed of %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
             if self.kernel_wise_deform:
