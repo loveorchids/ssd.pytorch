@@ -48,7 +48,8 @@ class SSD(nn.Module):
 
         if phase == 'test':
             self.softmax = nn.Softmax(dim=-1)
-            self.detect = Detect(num_classes, bkg_label=0, top_k=200, conf_thresh=0.1, nms_thresh=0.45)
+            self.detect = Detect(num_classes, bkg_label=0, top_k=args.top_k,
+                                 conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
 
     def forward(self, x, deform_map=False):
         """Applies network layers and ops on input image(s) x.
@@ -248,22 +249,22 @@ class DetectionHeader(nn.Module):
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
         if self.deformation:
             if self.deform_by_input:
-                deform_map = [offset(x) for offset in self.offset_groups]
+                _deform_map = [offset(x) for offset in self.offset_groups]
             else:
-                deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
+                _deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
             if verbose:
-                print("deform_map shape is composed of %d %s" % (len(deform_map), str(deform_map[0].shape)))
+                print("deform_map shape is composed of %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
             if self.kernel_wise_deform:
-                deform_map = [dm.repeat(1, self.kernel_size**2, 1, 1) for dm in deform_map]
+                _deform_map = [dm.repeat(1, self.kernel_size ** 2, 1, 1) for dm in _deform_map]
             if verbose:
-                print("deform_map shape is extended to %d %s" % (len(deform_map), str(deform_map[0].shape)))
-            pred = [deform(x, deform_map[i]) for i, deform in enumerate(self.conf_layers)]
+                print("deform_map shape is extended to %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
+            pred = [deform(x, _deform_map[i]) for i, deform in enumerate(self.conf_layers)]
         else:
             pred = [conf(x) for conf in self.conf_layers]
         if verbose:
             print("pred shape is composed of %d %s" % (len(pred), str(pred[0].shape)))
         if deform_map:
-            return torch.cat(regression, dim=1), torch.cat(pred, dim=1), deform_map
+            return torch.cat(regression, dim=1), torch.cat(pred, dim=1), _deform_map
         else:
             return torch.cat(regression, dim=1), torch.cat(pred, dim=1)
 

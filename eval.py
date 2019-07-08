@@ -35,6 +35,8 @@ def str2bool(v):
 
 parser = argparse.ArgumentParser(
     description='Single Shot MultiBox Detector Evaluation')
+parser.add_argument('-impl', '--implementation', default="header", type=str,
+                    help='ways of implementation')
 parser.add_argument('--trained_model',
                     default='weights/', type=str,
                     help='Trained state_dict file path to open')
