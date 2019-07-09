@@ -40,7 +40,7 @@ class SSD(nn.Module):
         self.L2Norm = L2Norm(512, 20)
         self.extras = nn.ModuleList(extras)
 
-        if args.implementation == "header":
+        if args.implementation in ["header", "190709"]:
             self.header = nn.ModuleList(head)
         elif args.implementation == "vanilla":
             self.loc = nn.ModuleList(head[0])
@@ -94,7 +94,7 @@ class SSD(nn.Module):
                 sources.append(x)
 
         # apply multibox head to source layers
-        if self.args.implementation == "header":
+        if self.args.implementation in ["header", "190709"]:
             for (x, h) in zip(sources, self.header):
                 if deform_map:
                     l, c, d = h(x, deform_map=deform_map)

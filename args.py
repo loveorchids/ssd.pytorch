@@ -15,12 +15,12 @@ def prepare_args(root_dir):
         description='Single Shot MultiBox Detector Evaluation')
 
     # Basic Argument
-    parser.add_argument('-impl', '--implementation', default="170709", type=str,
-                        choices=["vanilla", "header", "170709"],
+    parser.add_argument('-impl', '--implementation', default="190709", type=str,
+                        choices=["vanilla", "header", "190709"],
                         help='vanilla represent default implementation, where conf and loc layers are not divided by ratio;'
                              'In header impl. conf and loc layers are separate by ratio, also support deformation'
                              '170709 on the basis of header, it can add deformation on deep layers')
-    parser.add_argument('--save_folder', default='weights/', type=str,
+    parser.add_argument('--save_folder', default='weights', type=str,
                         help='Trained state_dict file path to open')
     parser.add_argument('--iter', default=20000, type=int,
                         help='num of trained iterations')

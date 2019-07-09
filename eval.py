@@ -515,7 +515,7 @@ if __name__ == '__main__':
         # initialize SSD
         model_name = "%s_%s_%s.pth"%(args.name, args.img_size, args.iter)
         print("Evaluation on model: %s"%model_name)
-        pretrained_weight = torch.load(args.save_folder + model_name)
+        pretrained_weight = torch.load(os.path.join(args.save_folder, model_name))
         net.load_state_dict(pretrained_weight)
         net.eval()
         print('Finished loading model!')

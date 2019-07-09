@@ -14,58 +14,7 @@ import torch.nn.init as init
 import torch.utils.data as data
 import numpy as np
 from args import prepare_args
-"""
-def str2bool(v):
-    return v.lower() in ("yes", "true", "t", "1")
 
-
-parser = argparse.ArgumentParser(
-    description='Single Shot MultiBox Detector Training With Pytorch')
-train_set = parser.add_mutually_exclusive_group()
-parser.add_argument('-impl', '--implementation', default="header", type=str,
-                    help='ways of implementation')
-parser.add_argument('--dataset', default='VOC', choices=['VOC', 'COCO'],
-                    type=str, help='VOC or COCO')
-parser.add_argument('--dataset_root', default=VOC_ROOT,
-                    help='Dataset root directory path')
-parser.add_argument('--basenet', default='vgg16_reducedfc.pth',
-                    help='Pretrained base model')
-parser.add_argument('--batch_size', default=96, type=int,
-                    help='Batch size for training')
-parser.add_argument('--max_iter', default=20010, type=int,
-                    help='iteration times for training')
-parser.add_argument('--resume', default=None, type=str,
-                    help='Checkpoint state_dict file to resume training from')
-parser.add_argument('--start_iter', default=0, type=int,
-                    help='Resume training at this iter')
-parser.add_argument('--num_workers', default=6, type=int,
-                    help='Number of workers used in dataloading')
-parser.add_argument('--cuda', default=True, type=str2bool,
-                    help='Use CUDA to train model')
-parser.add_argument('--optimizer', default="Adam", type=str,
-                    help='which optimizer to use.')
-parser.add_argument('--lr', '--learning-rate', default=1e-4, type=float,
-                    help='initial learning rate')
-parser.add_argument('--momentum', default=0.9, type=float,
-                    help='Momentum value for optim')
-parser.add_argument('--weight_decay', default=5e-4, type=float,
-                    help='Weight decay for SGD')
-parser.add_argument('--gamma', default=0.1, type=float,
-                    help='Gamma update for SGD')
-parser.add_argument('--visdom', default=False, type=bool,
-                    help='Use visdom for loss visualization')
-
-parser.add_argument('--deformation', default=False, type=str2bool,
-                    help='use deformation in detection head')
-parser.add_argument('-kwd', '--kernel_wise_deform', default=False, type=bool,
-                    help='if True, apply deformation for each pixel in kernel')
-parser.add_argument('--deformation_source', default='concate', type=str,
-                    help='the source tensor to generate deformation tensor')
-parser.add_argument('--save_folder', default='weights/',
-                    help='Directory for saving checkpoint models')
-parser.add_argument('--name', default='SSD',
-                    help='Model name')
-args = parser.parse_args()"""
 args = prepare_args(VOC_ROOT)
 if args.visdom:
     import visdom
@@ -109,7 +58,7 @@ def train():
         print('Resuming training, loading {}...'.format(args.resume))
         ssd_net.load_weights(args.resume)
     else:
-        vgg_weights = torch.load(args.save_folder + args.basenet)
+        vgg_weights = torch.load(os.path.join(args.save_folder, args.basenet))
         print('Loading base network...')
         ssd_net.vgg.load_state_dict(vgg_weights)
 
@@ -120,7 +69,7 @@ def train():
         print('Initializing weights...')
         # initialize newly added layers' weights with xavier method
         ssd_net.extras.apply(weights_init)
-        if args.implementation == "header":
+        if args.implementation in ["header", "190709"]:
             ssd_net.header.apply(weights_init)
         elif args.implementation == "vanilla":
             ssd_net.loc.apply(weights_init)
@@ -160,6 +109,8 @@ def train():
                                   pin_memory=True)
     # create batch iterator
     batch_iterator = iter(data_loader)
+    loc_losses, conf_losses = [], []
+    progress = open(os.path.join(args.save_folder, "%s_train_prog.txt" % args.name), "w")
     for iteration in range(args.start_iter, args.max_iter):
         #print("iteration: %s"%iteration)
         if args.visdom and iteration != 0 and (iteration % epoch_size == 0):
@@ -197,11 +148,14 @@ def train():
         optimizer.step()
         loc_loss += loss_l.data
         conf_loss += loss_c.data
-
-        if iteration % 10 == 0:
+        loc_losses.append(float(loss_l.data))
+        conf_losses.append(float(loss_c.data))
+        result = "--loc_loss: %.4f conf_loss: %.4f--\n"%(float(loss_l.data), float(loss_c.data))
+        progress.write(result)
+        if iteration > 0 and iteration % 10 == 0:
             t1 = time.time()
             print('timer: %.4f sec.' % (t1 - t0))
-            print('iter ' + repr(iteration) + ' || Loss: %.4f ||' % (loss.data), end=' ')
+            print('iter ' + repr(iteration) + ' || Loss: %.4f || Conf_Loss: %.4f || Loc_Loss: %.4f ||' % (loss.data, loss_l.data, loss_c.data), end=' ')
 
         if args.visdom:
             update_vis_plot(iteration, loss_l.data, loss_c.data,
@@ -209,7 +163,9 @@ def train():
 
         if iteration > 5000 and iteration % 2000 == 0:
             print('Saving state, iter:', iteration)
-            torch.save(ssd_net.state_dict(), 'weights/%s_%s_%s.pth'%(args.name, args.imgsize, repr(iteration)))
+            torch.save(ssd_net.state_dict(), os.path.join(args.save_folder,
+                                                          '%s_%s_%s.pth'%(args.name, args.img_size, repr(iteration))))
+    progress.close()
 
 
 def adjust_learning_rate(optimizer, gamma, step):
