@@ -155,7 +155,7 @@ def train():
         if iteration > 0 and iteration % 10 == 0:
             t1 = time.time()
             print('timer: %.4f sec.' % (t1 - t0))
-            print('iter ' + repr(iteration) + ' || Loss: %.4f || Conf_Loss: %.4f || Loc_Loss: %.4f ||' % (loss.data, loss_l.data, loss_c.data), end=' ')
+            print('iter ' + repr(iteration) + ' || Loss: %.4f || Conf_Loss: %.4f || Loc_Loss: %.4f ||' % (loss.data, loss_c.data, loss_l.data), end=' ')
 
         if args.visdom:
             update_vis_plot(iteration, loss_l.data, loss_c.data,
