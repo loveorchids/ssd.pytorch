@@ -24,13 +24,14 @@ import argparse
 import numpy as np
 import pickle
 import cv2
+from args import prepare_args
 
 if sys.version_info[0] == 2:
     import xml.etree.cElementTree as ET
 else:
     import xml.etree.ElementTree as ET
 
-
+"""
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
@@ -39,7 +40,7 @@ parser = argparse.ArgumentParser(
     description='Single Shot MultiBox Detector Evaluation')
 parser.add_argument('-impl', '--implementation', default="header", type=str,
                     help='ways of implementation')
-parser.add_argument('--trained_model',
+parser.add_argument('--save_folder',
                     default='weights/', type=str,
                     help='Trained state_dict file path to open')
 parser.add_argument('--iter', default=40000, type=int,
@@ -63,10 +64,12 @@ parser.add_argument('--cleanup', default=True, type=str2bool,
 
 parser.add_argument('--deformation', default=False, type=str2bool,
                     help='use deformation in detection head')
-parser.add_argument('--kernel_wise_deform', default=False, type=str2bool,
-                    help='if True, apply deformation for each pixel in kernel or for the whole kernel')
-parser.add_argument('--deformation_source', default=False, type=str2bool,
-                    help='use input tensor to infer deformation map or not')
+parser.add_argument('-kwd', '--kernel_wise_deform', default=False, type=str2bool,
+                    help='if True, apply deformation for each pixel in kernel')
+parser.add_argument('--deformation_source', default='concate', type=str,
+                    help='the source tensor to generate deformation tensor')
+parser.add_argument('-vd', '--visualize_deformation', default=False, type=bool,
+                    help="visualize deformation or not")
 
 parser.add_argument( "--top_k", type=int, help="detector top_k", default=200)
 parser.add_argument("--conf_threshold",type=float,help="detector_conf_threshold",default=0.01)
@@ -76,20 +79,9 @@ parser.add_argument('--name', default='SSD', type=str, help='Model name')
 parser.add_argument('--year', default=2007, type=int, help='which set to test')
 parser.add_argument('--phase', default='test', type=str, help='which set to test')
 
-args = parser.parse_args()
-
-if not os.path.exists(args.save_folder):
-    os.mkdir(args.save_folder)
-
-if torch.cuda.is_available():
-    if args.cuda:
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
-    if not args.cuda:
-        print("WARNING: It looks like you have a CUDA device, but aren't using \
-              CUDA.  Run with --cuda for optimal eval speed.")
-        torch.set_default_tensor_type('torch.FloatTensor')
-else:
-    torch.set_default_tensor_type('torch.FloatTensor')
+args = parser.parse_args()"""
+args = prepare_args(VOC_ROOT)
+torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 annopath = os.path.join(args.voc_root, 'VOC2007', 'Annotations', '%s.xml')
 imgpath = os.path.join(args.voc_root, 'VOC2007', 'JPEGImages', '%s.jpg')
@@ -98,7 +90,7 @@ imgsetpath = os.path.join(args.voc_root, 'VOC2007', 'ImageSets',
 YEAR = str(args.year)
 devkit_path = args.voc_root + 'VOC' + YEAR
 dataset_mean = (104, 117, 123)
-set_type = args.phase
+set_type = args.set
 print("")
 print("Evaluation on %s set: %s."%(set_type, devkit_path))
 
@@ -416,10 +408,13 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         if args.cuda:
             x = x.cuda()
         _t['im_detect'].tic()
-        #detections = net(x).data
-        detections, deform_pyramid = net(x, deform_map=True)
-        detections = detections.data
-        visualize_deformation(voc, x, deform_pyramid, i)
+        if args.visualize_deformation:
+            detections, deform_pyramid = net(x, deform_map=True)
+            detections = detections.data
+            visualize_deformation(voc, x, deform_pyramid, i)
+        else:
+            detections = net(x).data
+
         #detect_time = _t['im_detect'].toc(average=False)
 
         # skip j = 0, because it's the background class
@@ -456,8 +451,10 @@ def evaluate_detections(box_list, output_dir, dataset):
     do_python_eval(output_dir)
 
 
-def visualize_deformation(cfg, img_tensor, deform_pyramid, idx, width=1):
-    path = os.path.expanduser("~/Pictures/deform_vis")
+def visualize_deformation(cfg, img_tensor, deform_pyramid, idx):
+    path = os.path.expanduser("~/Pictures/deform_vis_%s"%args.name)
+    if not os.path.exists(path):
+        os.mkdir(path)
     height = img_tensor.size(2)
     width = img_tensor.size(3)
     fm_size = cfg['feature_maps'][:len(deform_pyramid)]
@@ -514,22 +511,21 @@ if __name__ == '__main__':
         args.cuda_id = 0
     with torch.cuda.device(args.cuda_id):
         num_classes = len(labelmap) + 1                      # +1 for background
-        net = build_ssd(args, 'test', 300, num_classes)
+        net = build_ssd(args, 'test', args.img_size, num_classes)
         # initialize SSD
-        model_name = "%s_%s_%s.pth"%(args.name, args.size, args.iter)
+        model_name = "%s_%s_%s.pth"%(args.name, args.img_size, args.iter)
         print("Evaluation on model: %s"%model_name)
-        pretrained_weight = torch.load(args.trained_model + model_name)
+        pretrained_weight = torch.load(args.save_folder + model_name)
         net.load_state_dict(pretrained_weight)
         net.eval()
         print('Finished loading model!')
         # load data
         dataset = VOCDetection(args.voc_root, [('2007', set_type)],
-                               BaseTransform(300, dataset_mean),
+                               BaseTransform(args.img_size, dataset_mean),
                                VOCAnnotationTransform())
         if args.cuda:
             net = net.cuda()
             cudnn.benchmark = True
         # evaluation
         test_net(args.save_folder, net, args.cuda, dataset,
-                 BaseTransform(net.size, dataset_mean), args.top_k, 300,
-                 thresh=args.confidence_threshold)
+                 BaseTransform(net.size, dataset_mean), args.top_k, args.img_size)

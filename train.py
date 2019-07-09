@@ -13,9 +13,8 @@ import torch.backends.cudnn as cudnn
 import torch.nn.init as init
 import torch.utils.data as data
 import numpy as np
-import argparse
-
-
+from args import prepare_args
+"""
 def str2bool(v):
     return v.lower() in ("yes", "true", "t", "1")
 
@@ -58,7 +57,7 @@ parser.add_argument('--visdom', default=False, type=bool,
 
 parser.add_argument('--deformation', default=False, type=str2bool,
                     help='use deformation in detection head')
-parser.add_argument('--kernel_wise_deform', default=False, type=str2bool,
+parser.add_argument('-kwd', '--kernel_wise_deform', default=False, type=bool,
                     help='if True, apply deformation for each pixel in kernel')
 parser.add_argument('--deformation_source', default='concate', type=str,
                     help='the source tensor to generate deformation tensor')
@@ -66,24 +65,15 @@ parser.add_argument('--save_folder', default='weights/',
                     help='Directory for saving checkpoint models')
 parser.add_argument('--name', default='SSD',
                     help='Model name')
-args = parser.parse_args()
-
+args = parser.parse_args()"""
+args = prepare_args(VOC_ROOT)
 if args.visdom:
     import visdom
     viz = visdom.Visdom()
 
-if torch.cuda.is_available():
-    if args.cuda:
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
-    if not args.cuda:
-        print("WARNING: It looks like you have a CUDA device, but aren't " +
-              "using CUDA.\nRun with --cuda for optimal training speed.")
-        torch.set_default_tensor_type('torch.FloatTensor')
-else:
-    torch.set_default_tensor_type('torch.FloatTensor')
+torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
-if not os.path.exists(args.save_folder):
-    os.mkdir(args.save_folder)
+
 
 
 def train():
@@ -217,12 +207,9 @@ def train():
             update_vis_plot(iteration, loss_l.data, loss_c.data,
                             iter_plot, epoch_plot, 'append')
 
-        if iteration != 0 and iteration % 2000 == 0:
+        if iteration > 5000 and iteration % 2000 == 0:
             print('Saving state, iter:', iteration)
-            torch.save(ssd_net.state_dict(), 'weights/' + args.name + '_300_' +
-                       repr(iteration) + '.pth')
-    torch.save(ssd_net.state_dict(),
-               args.save_folder + '' + args.dataset + '.pth')
+            torch.save(ssd_net.state_dict(), 'weights/%s_%s_%s.pth'%(args.name, args.imgsize, repr(iteration)))
 
 
 def adjust_learning_rate(optimizer, gamma, step):

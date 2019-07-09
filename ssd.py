@@ -187,18 +187,21 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
     conf_layers = []
     vgg_source = [21, -2]
 
-    if opt.implementation == "header":
+    if opt.implementation in ["header", "190709"]:
         for k, v in enumerate(vgg_source):
             header += [DetectionHeader(vgg[v].out_channels, cfg[k], num_classes,
                                        deformation=opt.deformation,
                                        kernel_wise_deform=opt.kernel_wise_deform,
                                        deformation_source=opt.deformation_source)]
         for k, v in enumerate(extra_layers[1::2], 2):
-            if k <= 4:
-                _deform = True
+            if opt.implementation == "190709":
+                if k <= 4:
+                    _deform = True
+                else:
+                    _deform = False
             else:
                 _deform = False
-            header += [DetectionHeader(v.out_channels, cfg[k], num_classes, deformation=False,
+            header += [DetectionHeader(v.out_channels, cfg[k], num_classes, deformation=_deform,
                                        kernel_wise_deform=opt.kernel_wise_deform,
                                        deformation_source=opt.deformation_source)]
         return vgg, extra_layers, header
