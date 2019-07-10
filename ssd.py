@@ -270,7 +270,7 @@ class DetectionHeader(nn.Module):
             if self.kernel_wise_deform:
                 _deform_map = [dm.repeat(1, self.kernel_size ** 2, 1, 1) for dm in _deform_map]
             # Amplify the offset signal, so it can deform the kernel to adjacent anchor
-            #_deform_map = [dm * h/x.size(2) for dm in _deform_map]
+            _deform_map = [dm * h/x.size(2) for dm in _deform_map]
             if verbose:
                 print("deform_map shape is extended to %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
             pred = [deform(x, _deform_map[i]) for i, deform in enumerate(self.conf_layers)]
