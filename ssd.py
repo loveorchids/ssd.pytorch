@@ -75,6 +75,7 @@ class SSD(nn.Module):
         conf = list()
         deform = list()
 
+        input_h, input_w = x.size(2), x.size(3)
         # apply vgg up to conv4_3 relu
         for k in range(23):
             x = self.vgg[k](x)
@@ -97,10 +98,10 @@ class SSD(nn.Module):
         if self.args.implementation in ["header", "190709"]:
             for (x, h) in zip(sources, self.header):
                 if deform_map:
-                    l, c, d = h(x, deform_map=deform_map)
+                    l, c, d = h(x, input_h, deform_map=deform_map)
                     deform.append(d)
                 else:
-                    l, c = h(x, deform_map=deform_map)
+                    l, c = h(x, input_h, deform_map=deform_map)
                 loc.append(l.permute(0, 2, 3, 1).contiguous())
                 conf.append(c.permute(0, 2, 3, 1).contiguous())
         elif self.args.implementation == "vanilla":
@@ -189,21 +190,14 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
 
     if opt.implementation in ["header", "190709"]:
         for k, v in enumerate(vgg_source):
-            header += [DetectionHeader(vgg[v].out_channels, cfg[k], num_classes,
-                                       deformation=opt.deformation,
-                                       kernel_wise_deform=opt.kernel_wise_deform,
-                                       deformation_source=opt.deformation_source)]
+            header += [DetectionHeader(vgg[v].out_channels, cfg[k], num_classes, opt)]
         for k, v in enumerate(extra_layers[1::2], 2):
             if opt.implementation == "190709":
-                if k <= 4:
-                    _deform = True
-                else:
-                    _deform = False
+                if k > 4:
+                    opt.deformation = False
             else:
-                _deform = False
-            header += [DetectionHeader(v.out_channels, cfg[k], num_classes, deformation=_deform,
-                                       kernel_wise_deform=opt.kernel_wise_deform,
-                                       deformation_source=opt.deformation_source)]
+                opt.deformation = False
+            header += [DetectionHeader(v.out_channels, cfg[k], num_classes, opt)]
         return vgg, extra_layers, header
     elif opt.implementation == "vanilla":
         for k, v in enumerate(vgg_source):
@@ -216,47 +210,48 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
 
 
 class DetectionHeader(nn.Module):
-    def __init__(self, in_channel, ratios, num_classes, ks=3, deformation=False,
-                 kernel_wise_deform=False, deformation_source="concate"):
+    def __init__(self, in_channel, ratios, num_classes, opt):
         super().__init__()
-        self.kernel_wise_deform = kernel_wise_deform
-        self.deformation_source = deformation_source
-        self.kernel_size = ks
-        self.deformation = deformation
+        self.kernel_wise_deform = opt.kernel_wise_deform
+        self.deformation_source = opt.deformation_source
+        self.kernel_size = 3
+        self.deformation = opt.deformation
 
         self.loc_layers = nn.ModuleList([])
         for i in range(ratios):
             self.loc_layers.append(nn.Conv2d(in_channel, 4, kernel_size=3, padding=1))
 
-        if deformation:
+        if opt.deformation:
             self.offset_groups = nn.ModuleList([])
-            if deformation_source.lower() == "input":
+            if opt.deformation_source.lower() == "input":
                 # Previous version, represent deformation_source is True
                 offset_in_channel = in_channel
-            elif deformation_source.lower() == "regression":
+            elif opt.deformation_source.lower() == "regression":
                 # Previous version, represent deformation_source is False
                 offset_in_channel = 4
-            elif deformation_source.lower() == "concate":
+            elif opt.deformation_source.lower() == "concate":
                 offset_in_channel = in_channel + 4
             else:
                 raise NotImplementedError()
-            if kernel_wise_deform:
+            if opt.kernel_wise_deform:
                 deform_depth = 2
             else:
-                deform_depth = 2 * (ks ** 2)
+                deform_depth = 2 * (self.kernel_size ** 2)
             for i in range(ratios):
-                _offset2d = nn.Conv2d(offset_in_channel, deform_depth, kernel_size=ks, padding=1)
+                pad = int(0.5 * (self.kernel_size - 1) + opt.deform_offset_dilation - 1)
+                _offset2d = nn.Conv2d(offset_in_channel, deform_depth, kernel_size=self.kernel_size,
+                                      bias=opt.deform_offset_bias, padding=pad, dilation=opt.deform_offset_dilation)
                 self.offset_groups.append(_offset2d)
 
         self.conf_layers = nn.ModuleList([])
         for i in range(ratios):
-            if deformation:
-                _deform = dcn.DeformConv(in_channel, num_classes, kernel_size=ks, padding=1, bias=False)
+            if opt.deformation:
+                _deform = dcn.DeformConv(in_channel, num_classes, kernel_size=self.kernel_size, padding=1, bias=False)
             else:
                 _deform = nn.Conv2d(in_channel, num_classes, kernel_size=3, padding=1)
             self.conf_layers.append(_deform)
 
-    def forward(self, x, verbose=False, deform_map=False):
+    def forward(self, x, h, verbose=False, deform_map=False):
         regression = [loc(x) for loc in self.loc_layers]
         if verbose:
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
@@ -274,6 +269,8 @@ class DetectionHeader(nn.Module):
                 print("deform_map shape is composed of %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
             if self.kernel_wise_deform:
                 _deform_map = [dm.repeat(1, self.kernel_size ** 2, 1, 1) for dm in _deform_map]
+            # Amplify the offset signal, so it can deform the kernel to adjacent anchor
+            #_deform_map = [dm * h/x.size(2) for dm in _deform_map]
             if verbose:
                 print("deform_map shape is extended to %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
             pred = [deform(x, _deform_map[i]) for i, deform in enumerate(self.conf_layers)]

@@ -47,6 +47,10 @@ def prepare_args(root_dir):
                         help='if True, apply deformation for each pixel in kernel')
     parser.add_argument('--deformation_source', default='concate', type=str,
                         help='the source tensor to generate deformation tensor')
+    parser.add_argument('--deform_offset_bias', default=False, type=str2bool,
+                        help='allow bias or not')
+    parser.add_argument('--deform_offset_dilation', default=1, type=int,
+                        help='allow bias or not')
     parser.add_argument("--top_k", type=int, help="detector top_k", default=200)
     parser.add_argument("--conf_threshold", type=float, help="detector_conf_threshold", default=0.01)
     parser.add_argument("--nms_threshold", type=float, help="detector_nms_threshold", default=0.45)

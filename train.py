@@ -14,6 +14,7 @@ import torch.nn.init as init
 import torch.utils.data as data
 import numpy as np
 from args import prepare_args
+import mmdet.ops.dcn as dcn
 
 args = prepare_args(VOC_ROOT)
 if args.visdom:
@@ -179,14 +180,29 @@ def adjust_learning_rate(optimizer, gamma, step):
         param_group['lr'] = lr
 
 
-def xavier(param):
-    init.xavier_uniform(param)
-
 
 def weights_init(m):
-    if isinstance(m, nn.Conv2d):
-        xavier(m.weight.data)
-        m.bias.data.zero_()
+    if type(m) == torch.nn.Linear:
+        torch.nn.init.xavier_normal_(m.weight)
+    elif type(m) == torch.nn.Conv2d:
+        torch.nn.init.kaiming_normal_(m.weight)
+    elif isinstance(m, torch.nn.BatchNorm2d):
+        torch.nn.init.constant_(m.weight, 1)
+        torch.nn.init.constant_(m.bias, 0)
+    else:
+        if type(m) is nn.ModuleList:
+            for _m in m:
+                if type(_m) == torch.nn.Linear:
+                    torch.nn.init.xavier_normal_(_m.weight)
+                elif type(_m) == torch.nn.Conv2d:
+                    torch.nn.init.kaiming_normal_(_m.weight)
+                elif isinstance(_m, torch.nn.BatchNorm2d):
+                    torch.nn.init.constant_(_m.weight, 1)
+                    torch.nn.init.constant_(_m.bias, 0)
+        elif type(m) is dcn.DeformConv:
+            torch.nn.init.kaiming_normal_(m.weight)
+        else:
+            pass
 
 
 def create_vis_plot(_xlabel, _ylabel, _title, _legend):

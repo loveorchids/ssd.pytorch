@@ -31,55 +31,6 @@ if sys.version_info[0] == 2:
 else:
     import xml.etree.ElementTree as ET
 
-"""
-def str2bool(v):
-    return v.lower() in ("yes", "true", "t", "1")
-
-
-parser = argparse.ArgumentParser(
-    description='Single Shot MultiBox Detector Evaluation')
-parser.add_argument('-impl', '--implementation', default="header", type=str,
-                    help='ways of implementation')
-parser.add_argument('--save_folder',
-                    default='weights/', type=str,
-                    help='Trained state_dict file path to open')
-parser.add_argument('--iter', default=40000, type=int,
-                    help='num of trained iterations')
-parser.add_argument('--size', default="300", type=str,
-                    help='input image size of SSD')
-parser.add_argument('--save_folder', default='eval/', type=str,
-                    help='File path to save results')
-parser.add_argument('--confidence_threshold', default=0.01, type=float,
-                    help='Detection confidence threshold')
-#parser.add_argument('--top_k', default=5, type=int,
-                    #help='Further restrict the number of predictions to parse')
-parser.add_argument('--cuda', default=True, type=str2bool,
-                    help='Use cuda to train model')
-parser.add_argument('--cuda_id', default=2, type=int,
-                    help='device id of test')
-parser.add_argument('--voc_root', default=VOC_ROOT,
-                    help='Location of VOC root directory')
-parser.add_argument('--cleanup', default=True, type=str2bool,
-                    help='Cleanup and remove results files following eval')
-
-parser.add_argument('--deformation', default=False, type=str2bool,
-                    help='use deformation in detection head')
-parser.add_argument('-kwd', '--kernel_wise_deform', default=False, type=str2bool,
-                    help='if True, apply deformation for each pixel in kernel')
-parser.add_argument('--deformation_source', default='concate', type=str,
-                    help='the source tensor to generate deformation tensor')
-parser.add_argument('-vd', '--visualize_deformation', default=False, type=bool,
-                    help="visualize deformation or not")
-
-parser.add_argument( "--top_k", type=int, help="detector top_k", default=200)
-parser.add_argument("--conf_threshold",type=float,help="detector_conf_threshold",default=0.01)
-parser.add_argument("--nms_threshold", type=float, help="detector_nms_threshold", default=0.45)
-
-parser.add_argument('--name', default='SSD', type=str, help='Model name')
-parser.add_argument('--year', default=2007, type=int, help='which set to test')
-parser.add_argument('--phase', default='test', type=str, help='which set to test')
-
-args = parser.parse_args()"""
 args = prepare_args(VOC_ROOT)
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
@@ -500,8 +451,6 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, idx):
             img = np.concatenate(ratio, axis=1)
             name = "dm_%d_%d_fm_%s.jpg"%(idx, batch_id, fm_size[i])
             cv2.imwrite(os.path.join(path, name), img)
-    
-
 
 
 if __name__ == '__main__':
