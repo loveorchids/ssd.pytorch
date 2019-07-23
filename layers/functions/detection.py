@@ -21,7 +21,7 @@ class Detect(Function):
         self.conf_thresh = conf_thresh
         self.variance = cfg['variance']
 
-    def forward(self, loc_data, conf_data, prior_data):
+    def forward(self, loc_data, conf_data, prior_data, all_loc=False):
         """
         Args:
             loc_data: (tensor) Loc preds from loc layers
@@ -38,6 +38,7 @@ class Detect(Function):
                                     self.num_classes).transpose(2, 1)
 
         # Decode predictions into bboxes.
+
         for i in range(num):
             decoded_boxes = decode(loc_data[i], prior_data, self.variance)
             # For each class, perform nms
@@ -45,6 +46,8 @@ class Detect(Function):
 
             for cl in range(1, self.num_classes):
                 c_mask = conf_scores[cl].gt(self.conf_thresh)
+                # 将c_mask中所有值为1的index取除，并提取conf_scores[cl]中相应维度的值
+                # 所以score的尺寸小于等于conf_scores[cl]的尺寸
                 scores = conf_scores[cl][c_mask]
                 if scores.size(0) == 0:
                     continue

@@ -16,7 +16,7 @@ import torch.utils.data as data
 from PIL import Image, ImageDraw
 
 from ssd import build_ssd
-
+from layers import *
 import sys
 import os
 import time
@@ -195,36 +195,24 @@ def voc_ap(rec, prec, use_07_metric=True):
     return ap
 
 
-def voc_eval(detpath,
-             annopath,
-             imagesetfile,
-             classname,
-             cachedir,
-             ovthresh=0.5,
-             use_07_metric=True):
-    """rec, prec, ap = voc_eval(detpath,
-                           annopath,
-                           imagesetfile,
-                           classname,
-                           [ovthresh],
-                           [use_07_metric])
-Top level function that does the PASCAL VOC evaluation.
-detpath: Path to detections
-   detpath.format(classname) should produce the detection results file.
-annopath: Path to annotations
-   annopath.format(imagename) should be the xml annotations file.
-imagesetfile: Text file containing the list of images, one image per line.
-classname: Category name (duh)
-cachedir: Directory for caching the annotations
-[ovthresh]: Overlap threshold (default = 0.5)
-[use_07_metric]: Whether to use VOC07's 11 point AP computation
-   (default True)
-"""
-# assumes detections are in detpath.format(classname)
-# assumes annotations are in annopath.format(imagename)
-# assumes imagesetfile is a text file with each line an image name
-# cachedir caches the annotations in a pickle file
-# first load gt
+def voc_eval(detpath, annopath, imagesetfile, classname, cachedir, ovthresh=0.5, use_07_metric=True):
+    """
+    rec, prec, ap = voc_eval(detpath, annopath, imagesetfile, classname, [ovthresh], [use_07_metric])
+        Top level function that does the PASCAL VOC evaluation.
+    :param detpath: Path to detections, should produce the detection results file.
+    :param annopath: Path to annotations, should be the xml annotations file.
+    :param imagesetfile: Text file containing the list of images, one image per line.
+    :param classname: Category name (duh)
+    :param cachedir: irectory for caching the annotations
+    :param ovthresh: Overlap threshold (default = 0.5)
+    :param use_07_metric: Whether to use VOC07's 11 point AP computation(default True)
+    :return:
+    """
+    # assumes detections are in detpath.format(classname)
+    # assumes annotations are in annopath.format(imagename)
+    # assumes imagesetfile is a text file with each line an image name
+    # cachedir caches the annotations in a pickle file
+    # first load gt
     if not os.path.isdir(cachedir):
         os.mkdir(cachedir)
     cachefile = os.path.join(cachedir, '%s_annots.pkl'%set_type)
@@ -333,14 +321,14 @@ cachedir: Directory for caching the annotations
 
 def test_net(save_folder, net, cuda, dataset, transform, top_k,
              im_size=300, thresh=0.05):
+
+    detector = Detect(num_classes, bkg_label=0, top_k=args.top_k,
+                         conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
+
     num_images = len(dataset)
-    # all detections are collected into:
-    #    all_boxes[cls][image] = N x 5 array of detections in
-    #    (x1, y1, x2, y2, score)
     all_boxes = [[[] for _ in range(num_images)]
                  for _ in range(len(labelmap)+1)]
 
-    # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
     output_dir = os.path.join(os.getcwd(), "experiments", args.name)
     if not os.path.exists(output_dir):
@@ -361,10 +349,11 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         _t['im_detect'].tic()
         if args.visualize_deformation:
             detections, deform_pyramid = net(x, deform_map=True)
-            detections = detections.data
+            detections = detector(detections[0], detections[1], detections[2]).data
             visualize_deformation(voc, x, deform_pyramid, i)
         else:
-            detections = net(x).data
+            detections = net(x)
+            detections = detector(detections[0], detections[1], detections[2]).data
 
         #detect_time = _t['im_detect'].toc(average=False)
 
@@ -412,14 +401,16 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, idx):
     # get deformation maps at different scale
     for i, deform_maps in enumerate(deform_pyramid):
         if deform_maps is None:
-            break
+            continue
         # get deformation maps for different ratio
         per_ratio = []
-        for deform in deform_maps:
+        for _d, deform in enumerate(deform_maps):
+            scale = height / deform.size(2)
             d_x = torch.mean(deform[:, 0::2, :, :], dim=1).unsqueeze(1)
             d_y = torch.mean(deform[:, 1::2, :, :], dim=1).unsqueeze(1)
             deform = torch.cat([d_x, d_y], dim=1)
-            # Get img data and convert to PIL Image
+            if i == 4 and _d == 0:
+                z=0
             per_batch = []
             for j in range(deform.size(0)):
                 img = img_tensor[j].permute(1, 2, 0).data.cpu().numpy()
@@ -437,7 +428,7 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, idx):
                 y_coords = [val for val in idx_y for _ in idx_x]
                 #coords = []
                 for k, x in enumerate(x_coords):
-                    img = cv2.line(img, (x, y_coords[k]), (int(round(x + dm[k, 1])), int(round(y_coords[k] + dm[k, 0]))),
+                    img = cv2.line(img, (x, y_coords[k]), (int(round(x + dm[k, 1] * scale)), int(round(y_coords[k] + dm[k, 0] * scale))),
                                    (0, 0, 255), 1)
                     # append start point
                     #coords.append((y_coords[k], x))

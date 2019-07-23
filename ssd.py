@@ -112,7 +112,7 @@ class SSD(nn.Module):
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
         if self.phase == "test":
-            output = self.detect(
+            output = (
                 loc.view(loc.size(0), -1, 4),                   # loc preds
                 self.softmax(conf.view(conf.size(0), -1,
                              self.num_classes)),                # conf preds
@@ -207,6 +207,8 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
             loc_layers += [nn.Conv2d(v.out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
             conf_layers += [nn.Conv2d(v.out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
         return vgg, extra_layers, (loc_layers, conf_layers)
+    else:
+        raise NotImplementedError()
 
 
 class DetectionHeader(nn.Module):
@@ -270,7 +272,7 @@ class DetectionHeader(nn.Module):
             if self.kernel_wise_deform:
                 _deform_map = [dm.repeat(1, self.kernel_size ** 2, 1, 1) for dm in _deform_map]
             # Amplify the offset signal, so it can deform the kernel to adjacent anchor
-            _deform_map = [dm * h/x.size(2) for dm in _deform_map]
+            #_deform_map = [dm * h/x.size(2) for dm in _deform_map]
             if verbose:
                 print("deform_map shape is extended to %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
             pred = [deform(x, _deform_map[i]) for i, deform in enumerate(self.conf_layers)]
