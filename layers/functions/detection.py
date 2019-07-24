@@ -11,6 +11,7 @@ class Detect(Function):
     confidence score and locations.
     """
     def __init__(self, num_classes, bkg_label, top_k, conf_thresh, nms_thresh):
+        super().__init__()
         self.num_classes = num_classes
         self.background_label = bkg_label
         self.top_k = top_k
@@ -21,7 +22,7 @@ class Detect(Function):
         self.conf_thresh = conf_thresh
         self.variance = cfg['variance']
 
-    def forward(self, loc_data, conf_data, prior_data, all_loc=False):
+    def forward(self, loc_data, conf_data, prior_data):
         """
         Args:
             loc_data: (tensor) Loc preds from loc layers
@@ -38,9 +39,10 @@ class Detect(Function):
                                     self.num_classes).transpose(2, 1)
 
         # Decode predictions into bboxes.
-
+        all_boxes = []
         for i in range(num):
             decoded_boxes = decode(loc_data[i], prior_data, self.variance)
+            all_boxes.append(decoded_boxes)
             # For each class, perform nms
             conf_scores = conf_preds[i].clone()
 
@@ -62,4 +64,4 @@ class Detect(Function):
         _, idx = flt[:, :, 0].sort(1, descending=True)
         _, rank = idx.sort(1)
         flt[(rank < self.top_k).unsqueeze(-1).expand_as(flt)].fill_(0)
-        return output
+        return output.data, torch.stack(all_boxes, dim=0).data
