@@ -427,7 +427,7 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, reg_boxes, default_bo
     fm_size = cfg['feature_maps'][:len(deform_pyramid)]
     # get deformation maps at different scale
     for i, deform_maps in enumerate(deform_pyramid):
-        if i <= 1:
+        if i == 0:
             # feature are too small
             continue
         if deform_maps is None:
