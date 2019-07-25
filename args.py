@@ -54,13 +54,13 @@ def prepare_args(root_dir):
     parser.add_argument("--top_k", type=int, help="detector top_k", default=200)
     parser.add_argument("--conf_threshold", type=float, help="detector_conf_threshold", default=0.01)
     parser.add_argument("--nms_threshold", type=float, help="detector_nms_threshold", default=0.45)
+    parser.add_argument('--overlap_threshold', type=float, default=0.5,
+                        help='overlap threshold to match prior to ground truth')
 
 
     # Training Parameter
     parser.add_argument('--basenet', default='vgg16_reducedfc.pth',
                         help='Pretrained base model')
-    parser.add_argument('--visdom', default=False, type=str2bool,
-                        help='Use visdom for loss visualization')
     parser.add_argument('--batch_size', default=96, type=int,
                         help='Batch size for training')
     parser.add_argument('--max_iter', default=20010, type=int,
@@ -90,6 +90,10 @@ def prepare_args(root_dir):
                         help="visualize deformation or not")
     parser.add_argument('--cuda_id', default=2, type=int,
                         help='device id of test')
+
+    # Others
+    parser.add_argument('--visdom', default=False, type=str2bool,
+                        help='Use visdom for loss visualization')
     args = parser.parse_args()
     if not os.path.exists(args.save_folder):
         os.mkdir(args.save_folder)
