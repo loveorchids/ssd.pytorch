@@ -45,6 +45,9 @@ def train():
         dataset = VOCDetection(root=args.dataset_root,
                                transform=SSDAugmentation(cfg['min_dim'],
                                                          MEANS))
+        testset = VOCDetection(args.voc_root, [('2007', "test")],
+                               BaseTransform(args.img_size, (104, 117, 123)),
+                               VOCAnnotationTransform())
 
 
 
@@ -81,8 +84,8 @@ def train():
     elif args.optimizer.lower() == "sgd":
         optimizer = optim.SGD(net.parameters(), lr=args.lr,  momentum=args.momentum,
                                weight_decay=args.weight_decay)
-    criterion = MultiBoxLoss(cfg['num_classes'], 0.5, True, 0, True, 3, 0.5,
-                             False, args.cuda)
+    criterion = MultiBoxLoss(cfg['num_classes'], args.overlap_threshold, True, 0,
+                             True, 3, 0.5, False, args.cuda)
 
     net.train()
     # loss counters

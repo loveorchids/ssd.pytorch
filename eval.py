@@ -12,11 +12,10 @@ from torch.autograd import Variable
 from data import VOC_ROOT, VOCAnnotationTransform, VOCDetection, BaseTransform
 from data import VOC_CLASSES as labelmap
 from data import voc, coco
-import torch.utils.data as data
-from PIL import Image, ImageDraw
+import imageio
 
 from ssd import build_ssd
-
+from layers import *
 import sys
 import os
 import time
@@ -25,6 +24,7 @@ import numpy as np
 import pickle
 import cv2
 from args import prepare_args
+from layers.box_utils import *
 
 if sys.version_info[0] == 2:
     import xml.etree.cElementTree as ET
@@ -321,14 +321,14 @@ def voc_eval(detpath, annopath, imagesetfile, classname, cachedir, ovthresh=0.5,
 
 def test_net(save_folder, net, cuda, dataset, transform, top_k,
              im_size=300, thresh=0.05):
+
+    detector = Detect(num_classes, bkg_label=0, top_k=args.top_k,
+                         conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
+
     num_images = len(dataset)
-    # all detections are collected into:
-    #    all_boxes[cls][image] = N x 5 array of detections in
-    #    (x1, y1, x2, y2, score)
     all_boxes = [[[] for _ in range(num_images)]
                  for _ in range(len(labelmap)+1)]
 
-    # timers
     _t = {'im_detect': Timer(), 'misc': Timer()}
     output_dir = os.path.join(os.getcwd(), "experiments", args.name)
     if not os.path.exists(output_dir):
@@ -349,13 +349,19 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         _t['im_detect'].tic()
         if args.visualize_deformation:
             detections, deform_pyramid = net(x, deform_map=True)
+            # reg_boxes and pred_box are in point form
+            detections, reg_boxes = detector(detections[0], detections[1], detections[2])
             detections = detections.data
-            visualize_deformation(voc, x, deform_pyramid, i)
+            cls = detections[0, 1:, :, 0]
+            reg = detections[0, 1:, :, 1:]
+            pred_box = reg[cls >= 0.1, :] * args.img_size
+            visualize_deformation(voc, x, deform_pyramid, reg_boxes, net.priors, pred_box, gt * args.img_size, i)
         else:
-            detections = net(x).data
+            detections = net(x)
+            detections, _ = detector(detections[0], detections[1], detections[2])
+            detections = detections.data
 
         #detect_time = _t['im_detect'].toc(average=False)
-
         # skip j = 0, because it's the background class
         for j in range(1, detections.size(1)):
             dets = detections[0, j, :]
@@ -390,8 +396,30 @@ def evaluate_detections(box_list, output_dir, dataset):
     do_python_eval(output_dir)
 
 
-def visualize_deformation(cfg, img_tensor, deform_pyramid, idx):
+def visualize_deformation(cfg, img_tensor, deform_pyramid, reg_boxes, default_boxes,
+                          pred_boxes, ground_truth, img_idx):
+    """
+    :param cfg:
+    :param img_tensor:
+    :param deform_pyramid:
+    :param reg_boxes: input is in point form
+    :param default_boxes: input is in center form
+    :param pred_boxes:
+    :param ground_truth:
+    :param img_idx:
+    :return:
+    """
     path = os.path.expanduser("~/Pictures/deform_vis_%s"%args.name)
+    img_path = os.path.join(path, "img_%d" % img_idx)
+    # reg_boxes to pyramid format:
+    start_idx = 0
+    reg_boxes_pyramids = []
+    prior_pyramids = []
+    for i, fm_size in enumerate(cfg["feature_maps"]):
+        end_idx = start_idx + fm_size**2 * (2 * len(cfg["aspect_ratios"][i]) + 2)
+        reg_boxes_pyramids.append(reg_boxes[:, start_idx:end_idx, :])
+        prior_pyramids.append(default_boxes[start_idx:end_idx, :])
+        start_idx = end_idx
     if not os.path.exists(path):
         os.mkdir(path)
     height = img_tensor.size(2)
@@ -399,12 +427,33 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, idx):
     fm_size = cfg['feature_maps'][:len(deform_pyramid)]
     # get deformation maps at different scale
     for i, deform_maps in enumerate(deform_pyramid):
+        if i == 0:
+            # feature are too small
+            continue
         if deform_maps is None:
             continue
         # get deformation maps for different ratio
         per_ratio = []
+        #start_idx = 0
+        fm_reg_boxes = reg_boxes_pyramids[i]
+        fm_priors = prior_pyramids[i]
         for _d, deform in enumerate(deform_maps):
             scale = height / deform.size(2)
+
+            # Get corresponding prior boxes and regressed box
+            idx = torch.tensor([_d + len(deform_maps) * i for i in range(deform.size(2) ** 2)]).long()
+            priors = fm_priors[idx, :]
+            boxes = fm_reg_boxes[:, idx, :]
+
+            overlaps = jaccard(torch.tensor(ground_truth[:, :-1]).float()/args.img_size,
+                               point_form(priors))
+            try:
+                matched_idx = [int(_idx) for _idx in torch.sum(overlaps >= 0.5, dim=0).nonzero().squeeze()]
+            except TypeError:
+                # Means no priors match the ground truth
+                matched_idx = []
+
+
             d_x = torch.mean(deform[:, 0::2, :, :], dim=1).unsqueeze(1)
             d_y = torch.mean(deform[:, 1::2, :, :], dim=1).unsqueeze(1)
             deform = torch.cat([d_x, d_y], dim=1)
@@ -412,11 +461,10 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, idx):
                 z=0
             per_batch = []
             for j in range(deform.size(0)):
+                box = boxes[j]
                 img = img_tensor[j].permute(1, 2, 0).data.cpu().numpy()
                 # Convert to numpy and RGB form
                 img = ((img - np.min(img)) / (np.max(img) - np.min(img)) * 255).astype("uint8")[:, :, (2, 1, 0)].copy()
-                #img = Image.fromarray(img)
-                #draw = ImageDraw.Draw(img)
                 dm = deform[j].view(2, -1).data.permute(1, 0).cpu().numpy()
                 idx_x = [int(round(num))
                          for num in np.linspace(width / fm_size[i], width, fm_size[i] + 1)][:-1]
@@ -425,23 +473,63 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, idx):
                 assert dm.shape[0] == len(idx_x) * len(idx_y)
                 x_coords = idx_x * len(idx_y)
                 y_coords = [val for val in idx_y for _ in idx_x]
-                #coords = []
+
+                # Draw prediction on image
+                for pred in pred_boxes:
+                    x1, y1, x2, y2 = norm(pred[0]), norm(pred[1]), norm(pred[2]), norm(pred[3])
+                    cv2.rectangle(img, (x1, y1), (x2, y2), (33, 179, 125), 1)
+                # Draw Ground Truth on image
+                for gt in ground_truth:
+                    x1, y1, x2, y2 = norm(gt[0]), norm(gt[1]), norm(gt[2]), norm(gt[3])
+                    cv2.rectangle(img, (x1, y1), (x2, y2), (33, 235, 63), 1)
+
+
+                gifs = []
                 for k, x in enumerate(x_coords):
-                    img = cv2.line(img, (x, y_coords[k]), (int(round(x + dm[k, 1] * scale)), int(round(y_coords[k] + dm[k, 0] * scale))),
-                                   (0, 0, 255), 1)
-                    # append start point
-                    #coords.append((y_coords[k], x))
-                    # append end point
-                    #coords.append()
-                #draw.line(coords, fill=(0, 0, 255), width=width)
+                    cv2.line(img, (x, y_coords[k]), (int(round(x + dm[k, 1] * scale)),
+                                                      int(round(y_coords[k] + dm[k, 0] * scale))), (0, 0, 255), 1)
+                    _img = img.copy()
+                    # Draw Priors
+                    if k in matched_idx:
+                        # purple
+                        color = (238, 23, 179)
+                        line_width = 2
+                    else:
+                        # blue
+                        color = (255, 105, 65)
+                        line_width = 1
+                    x1, y1, x2, y2 = coord_to_rect(priors[k], args.img_size, args.img_size)
+                    cv2.rectangle(_img, (x1, y1), (x2, y2), color, line_width)
+                    # Draw Regressed Boxes
+                    x1, y1, x2, y2 = (box[k].clamp(min=0, max=1) * args.img_size).long().cpu().numpy()
+                    cv2.rectangle(_img, (x1, y1), (x2, y2), (70, 67, 238), 1)
+                    gifs.append(_img[:, :, [2, 1, 0]])
                 per_batch.append(img)
+                #for _idx, img in enumerate(gifs):
+                    #cv2.imwrite("/home/wang/Pictures/tmp_%s.jpg"%str(_idx).zfill(4), img)
+                if not os.path.exists(img_path):
+                    os.mkdir(img_path)
+                imageio.mimsave(os.path.join(
+                    img_path, 'fm_%s_asr_%s.gif'%(cfg["feature_maps"][i], _d)), gifs)
             per_ratio.append(per_batch)
         per_ratio = list(map(list, zip(*per_ratio)))
         for batch_id, ratio in enumerate(per_ratio):
             img = np.concatenate(ratio, axis=1)
-            name = "dm_%d_%d_fm_%s.jpg"%(idx, batch_id, fm_size[i])
-            cv2.imwrite(os.path.join(path, name), img)
+            name = "batch_%d_fm_%s.jpg"%(batch_id, fm_size[i])
+            cv2.imwrite(os.path.join(img_path, name), img)
 
+
+def coord_to_rect(boxes, height, width):
+    """
+    Convert 4 point boundbox coordinate to matplotlib rectangle coordinate
+    """
+    x1, y1, x2, y2  = torch.cat((boxes[:2] - boxes[2:] / 2, boxes[:2] + boxes[2:] / 2), 0).clamp_(max=1, min=0)
+    return int(x1 * width), int(y1 * height), int(x2 * width), int(y2 * height)
+
+def norm(x):
+    x = 0 if x < 0 else x
+    x = args.img_size if x >= args.img_size else x
+    return int(x)
 
 if __name__ == '__main__':
     # load net

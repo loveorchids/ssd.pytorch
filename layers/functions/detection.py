@@ -11,6 +11,7 @@ class Detect(Function):
     confidence score and locations.
     """
     def __init__(self, num_classes, bkg_label, top_k, conf_thresh, nms_thresh):
+        super().__init__()
         self.num_classes = num_classes
         self.background_label = bkg_label
         self.top_k = top_k
@@ -38,13 +39,17 @@ class Detect(Function):
                                     self.num_classes).transpose(2, 1)
 
         # Decode predictions into bboxes.
+        all_boxes = []
         for i in range(num):
             decoded_boxes = decode(loc_data[i], prior_data, self.variance)
+            all_boxes.append(decoded_boxes)
             # For each class, perform nms
             conf_scores = conf_preds[i].clone()
 
             for cl in range(1, self.num_classes):
                 c_mask = conf_scores[cl].gt(self.conf_thresh)
+                # 将c_mask中所有值为1的index取除，并提取conf_scores[cl]中相应维度的值
+                # 所以score的尺寸小于等于conf_scores[cl]的尺寸
                 scores = conf_scores[cl][c_mask]
                 if scores.size(0) == 0:
                     continue
@@ -59,4 +64,4 @@ class Detect(Function):
         _, idx = flt[:, :, 0].sort(1, descending=True)
         _, rank = idx.sort(1)
         flt[(rank < self.top_k).unsqueeze(-1).expand_as(flt)].fill_(0)
-        return output
+        return output.data, torch.stack(all_boxes, dim=0).data

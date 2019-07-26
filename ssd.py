@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from layers import *
+from layers.box_utils import *
 from data import voc, coco
 import os
 import mmdet.ops.dcn as dcn
@@ -31,7 +32,9 @@ class SSD(nn.Module):
         self.num_classes = num_classes
         self.cfg = (coco, voc)[num_classes == 21]
         self.priorbox = PriorBox(self.cfg)
-        self.priors = Variable(self.priorbox.forward())
+        prior = Variable(self.priorbox.forward())
+        self.priors = [prior.cuda(i) for i in range(torch.cuda.device_count())]
+        self.prior_centeroids = [center_conv_point(point_form(prior)) for prior in self.priors]
         self.size = size
         self.args = args
         # SSD network
@@ -96,12 +99,17 @@ class SSD(nn.Module):
 
         # apply multibox head to source layers
         if self.args.implementation in ["header", "190709"]:
-            for (x, h) in zip(sources, self.header):
+            start_id = 0
+            for idx, (x, h) in enumerate(zip(sources, self.header)):
+                end_id = start_id + x.size(2) * x.size(3) * (2 + 2 * len(self.cfg["aspect_ratios"][idx]))
                 if deform_map:
-                    l, c, d = h(x, input_h, deform_map=deform_map)
+                    l, c, d = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
+                                prior_centeroids=self.prior_centeroids[x.device.index][start_id: end_id], cfg=self.cfg)
                     deform.append(d)
                 else:
-                    l, c = h(x, input_h, deform_map=deform_map)
+                    l, c = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
+                             prior_centeroids=self.prior_centeroids[x.device.index][start_id: end_id], cfg=self.cfg)
+                start_id = end_id
                 loc.append(l.permute(0, 2, 3, 1).contiguous())
                 conf.append(c.permute(0, 2, 3, 1).contiguous())
         elif self.args.implementation == "vanilla":
@@ -112,7 +120,7 @@ class SSD(nn.Module):
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
         if self.phase == "test":
-            output = self.detect(
+            output = (
                 loc.view(loc.size(0), -1, 4),                   # loc preds
                 self.softmax(conf.view(conf.size(0), -1,
                              self.num_classes)),                # conf preds
@@ -223,7 +231,7 @@ class DetectionHeader(nn.Module):
         for i in range(ratios):
             self.loc_layers.append(nn.Conv2d(in_channel, 4, kernel_size=3, padding=1))
 
-        if opt.deformation:
+        if opt.deformation and opt.deformation_source.lower() != "geometric":
             self.offset_groups = nn.ModuleList([])
             if opt.deformation_source.lower() == "input":
                 # Previous version, represent deformation_source is True
@@ -233,6 +241,8 @@ class DetectionHeader(nn.Module):
                 offset_in_channel = 4
             elif opt.deformation_source.lower() == "concate":
                 offset_in_channel = in_channel + 4
+            elif opt.deformation_source.lower() == "geometric":
+                raise ArithmeticError()
             else:
                 raise NotImplementedError()
             if opt.kernel_wise_deform:
@@ -242,7 +252,8 @@ class DetectionHeader(nn.Module):
             for i in range(ratios):
                 pad = int(0.5 * (self.kernel_size - 1) + opt.deform_offset_dilation - 1)
                 _offset2d = nn.Conv2d(offset_in_channel, deform_depth, kernel_size=self.kernel_size,
-                                      bias=opt.deform_offset_bias, padding=pad, dilation=opt.deform_offset_dilation)
+                                      bias=opt.deform_offset_bias, padding=pad,
+                                      dilation=opt.deform_offset_dilation)
                 self.offset_groups.append(_offset2d)
 
         self.conf_layers = nn.ModuleList([])
@@ -253,7 +264,10 @@ class DetectionHeader(nn.Module):
                 _deform = nn.Conv2d(in_channel, num_classes, kernel_size=3, padding=1)
             self.conf_layers.append(_deform)
 
-    def forward(self, x, h, verbose=False, deform_map=False):
+    def forward(self, x, h, verbose=False, deform_map=False, priors=None, prior_centeroids=None, cfg=None):
+        # regression is a list, the length of regression equals to the number different aspect ratio
+        # under current receptive field, elements of regression are PyTorch Tensor, encoded in
+        # point-form, represent the regressed prior boxes.
         regression = [loc(x) for loc in self.loc_layers]
         if verbose:
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
@@ -262,11 +276,24 @@ class DetectionHeader(nn.Module):
                 _deform_map = [offset(x) for offset in self.offset_groups]
             elif self.deformation_source.lower() == "regression":
                 _deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
+            elif self.deformation_source.lower() == "geometric":
+                if priors is None:
+                    raise TypeError("prior should not be none if the deformation source is geometric")
+                _deform_map = []
+                for i, reg in enumerate(regression):
+                    idx = torch.tensor([i + len(regression) * _ for _ in range(reg.size(2) * reg.size(3))]).long()
+                    prior = priors[idx, :]
+                    prior_center = prior_centeroids[idx, :].repeat(x.size(0), 1)
+                    _reg = decode(reg.permute(0, 2, 3, 1).contiguous().view(-1, 4),
+                                  prior.repeat(x.size(0), 1), cfg["variance"]).clamp(min=0, max=1)
+                    reg_center = center_conv_point(_reg)
+                    _deform_map.append((reg_center - prior_center).view(x.size(0), reg.size(2), reg.size(3), -1).permute(0, 3, 1, 2))
             elif self.deformation_source.lower() == "concate":
                 # TODO: reimplement forward graph
                 raise NotImplementedError()
             else:
                 raise NotImplementedError()
+
             if verbose:
                 print("deform_map shape is composed of %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
             if self.kernel_wise_deform:
