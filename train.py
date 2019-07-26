@@ -45,6 +45,9 @@ def train():
         dataset = VOCDetection(root=args.dataset_root,
                                transform=SSDAugmentation(cfg['min_dim'],
                                                          MEANS))
+        testset = VOCDetection(args.voc_root, [('2007', "test")],
+                               BaseTransform(args.img_size, (104, 117, 123)),
+                               VOCAnnotationTransform())
 
 
 

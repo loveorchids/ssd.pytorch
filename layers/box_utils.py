@@ -239,19 +239,12 @@ def nms(boxes, scores, overlap=0.5, top_k=200):
     return keep, count
 
 def center_conv_point(bboxes, kernel_size=3, c_min=0, c_max=1):
-    prior_centers = []
-    for bbox in bboxes:
-        c_x = bbox[2:] - bbox[:2]
-        x1, y1, x2, y2 = bbox.clamp(min=c_min, max=c_max)
-        # the gradient was not kept
-        step_x = float((x2 - x1) / kernel_size)
-        start_x = float(x1 + step_x / 2)
-        end_x = float(x2)
-        step_y = float((y2 - y1) / kernel_size)
-        start_y = float(y1 + step_y / 2)
-        end_y = float(y2)
-        prior_center = torch.meshgrid([torch.arange(start_x, end_x, step_x),
-                                       torch.arange(start_y, end_y, step_y)])
-        prior_center = torch.stack(prior_center, dim=-1).contiguous().view(-1)
-        prior_centers.append(prior_center)
-    return torch.stack(prior_centers, dim=0)
+    """In a parallel manner also keeps the gradient during BP"""
+    bboxes.clamp_(min=c_min, max=c_max)
+    base = torch.cat([bboxes[:, :2]] * (kernel_size ** 2), dim=1)
+    multiplier = torch.tensor([(2 * i + 1) / kernel_size / 2 for i in range(kernel_size)]).cuda(bboxes.device.index)
+    multiplier = torch.stack(torch.meshgrid([multiplier, multiplier]), dim=-1).contiguous().view(-1)
+    multiplier = multiplier.unsqueeze(0).repeat(bboxes.size(0), 1)
+    center = torch.stack([bboxes[:, 2] - bboxes[:, 0], bboxes[:, 3] - bboxes[:, 1]], dim=-1)
+    center = torch.cat([center] * (kernel_size ** 2), dim=1)
+    return base + center * multiplier
