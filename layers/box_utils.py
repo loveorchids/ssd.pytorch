@@ -242,9 +242,12 @@ def center_conv_point(bboxes, kernel_size=3, c_min=0, c_max=1):
     """In a parallel manner also keeps the gradient during BP"""
     bboxes.clamp_(min=c_min, max=c_max)
     base = torch.cat([bboxes[:, :2]] * (kernel_size ** 2), dim=1)
-    multiplier = torch.tensor([(2 * i + 1) / kernel_size / 2 for i in range(kernel_size)]).cuda(bboxes.device.index)
-    multiplier = torch.stack(torch.meshgrid([multiplier, multiplier]), dim=-1).contiguous().view(-1)
+    multiplier = torch.tensor([(2 * i + 1) / kernel_size / 2
+                               for i in range(kernel_size)]).cuda(bboxes.device.index)
+    multiplier = torch.stack(torch.meshgrid([multiplier, multiplier]),
+                             dim=-1).contiguous().view(-1)
     multiplier = multiplier.unsqueeze(0).repeat(bboxes.size(0), 1)
-    center = torch.stack([bboxes[:, 2] - bboxes[:, 0], bboxes[:, 3] - bboxes[:, 1]], dim=-1)
+    center = torch.stack([bboxes[:, 2] - bboxes[:, 0], bboxes[:, 3] - bboxes[:, 1]],
+                         dim=-1)
     center = torch.cat([center] * (kernel_size ** 2), dim=1)
     return base + center * multiplier
