@@ -241,15 +241,17 @@ def nms(boxes, scores, overlap=0.5, top_k=200):
 def center_conv_point(bboxes, kernel_size=3, c_min=0, c_max=1):
     prior_centers = []
     for bbox in bboxes:
-        x1, y1, x2, y2 = bbox.clamp(min=c_min, max=c_max).float().data.numpy()
-        step_x = (x2 - x1) / kernel_size
-        start_x = x1 + step_x / 2
-        end_x = x2
-        step_y = (y2 - y1) / kernel_size
-        start_y = y1 + step_y / 2
-        end_y = y2
-        prior_center = torch.meshgrid([torch.arange(start_x, end_x, step_x), torch.arange(start_y, end_y, step_y)])
-        prior_center = torch.stack(prior_center, dim=0).permute(1, 2, 0)
-        print(prior_center.shape)
-        prior_centers.append(prior_center.contiguous().view(1, -1))
-    return torch.cat(prior_centers, dim=0)
+        c_x = bbox[2:] - bbox[:2]
+        x1, y1, x2, y2 = bbox.clamp(min=c_min, max=c_max)
+        # the gradient was not kept
+        step_x = float((x2 - x1) / kernel_size)
+        start_x = float(x1 + step_x / 2)
+        end_x = float(x2)
+        step_y = float((y2 - y1) / kernel_size)
+        start_y = float(y1 + step_y / 2)
+        end_y = float(y2)
+        prior_center = torch.meshgrid([torch.arange(start_x, end_x, step_x),
+                                       torch.arange(start_y, end_y, step_y)])
+        prior_center = torch.stack(prior_center, dim=-1).contiguous().view(-1)
+        prior_centers.append(prior_center)
+    return torch.stack(prior_centers, dim=0)
