@@ -60,7 +60,8 @@ def train():
 
     if args.resume:
         print('Resuming training, loading {}...'.format(args.resume))
-        ssd_net.load_weights(args.resume)
+        weights = torch.load(os.path.join(args.save_folder, args.resume))
+        ssd_net.load_state_dict(weights)
     else:
         vgg_weights = torch.load(os.path.join(args.save_folder, args.basenet))
         print('Loading base network...')

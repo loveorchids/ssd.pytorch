@@ -124,7 +124,7 @@ class SSD(nn.Module):
                 loc.view(loc.size(0), -1, 4),                   # loc preds
                 self.softmax(conf.view(conf.size(0), -1,
                              self.num_classes)),                # conf preds
-                self.priors.type(type(x.data))                  # default boxes
+                self.priors[x.device.index].type(type(x.data))                  # default boxes
             )
         else:
             output = (

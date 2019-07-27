@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from data import coco as cfg
 from ..box_utils import match, log_sum_exp
+from layers.box_utils import *
 
 
 class MultiBoxLoss(nn.Module):
@@ -67,16 +68,11 @@ class MultiBoxLoss(nn.Module):
         loc_t = torch.Tensor(num, num_priors, 4)
         conf_t = torch.LongTensor(num, num_priors)
 
-
-
-        #decoded_boxes = decode(loc_data[i], priors.data, self.variance)
-
-
-
         for idx in range(num):
             truths = targets[idx][:, :-1].data
             labels = targets[idx][:, -1].data
             defaults = priors.data
+            #defaults = decode(loc_data[idx], priors.data, self.variance)
             match(self.threshold, truths, defaults, self.variance, labels,
                   loc_t, conf_t, idx)
         if self.use_gpu:

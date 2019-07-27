@@ -355,7 +355,8 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             cls = detections[0, 1:, :, 0]
             reg = detections[0, 1:, :, 1:]
             pred_box = reg[cls >= 0.1, :] * args.img_size
-            visualize_deformation(voc, x, deform_pyramid, reg_boxes, net.priors, pred_box, gt * args.img_size, i)
+            visualize_deformation(voc, x, deform_pyramid, reg_boxes, net.priors[x.device.index],
+                                  pred_box, gt * args.img_size, i)
         else:
             detections = net(x)
             detections, _ = detector(detections[0], detections[1], detections[2])
