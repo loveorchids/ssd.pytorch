@@ -32,9 +32,10 @@ class SSD(nn.Module):
         self.num_classes = num_classes
         self.cfg = (coco, voc)[num_classes == 21]
         self.priorbox = PriorBox(self.cfg)
-        prior = Variable(self.priorbox.forward())
+        prior = self.priorbox.forward()
         self.priors = [prior.cuda(i) for i in range(torch.cuda.device_count())]
-        self.prior_centeroids = [center_conv_point(point_form(prior)) for prior in self.priors]
+        self.prior_centeroids = [center_conv_point(point_form(prior).clamp(min=0, max=1))
+                                 for prior in self.priors]
         self.size = size
         self.args = args
         # SSD network
@@ -103,12 +104,12 @@ class SSD(nn.Module):
             for idx, (x, h) in enumerate(zip(sources, self.header)):
                 end_id = start_id + x.size(2) * x.size(3) * (2 + 2 * len(self.cfg["aspect_ratios"][idx]))
                 if deform_map:
-                    l, c, d = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                                prior_centeroids=self.prior_centeroids[x.device.index][start_id: end_id], cfg=self.cfg)
-                    deform.append(d)
+                  l, c, d = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
+                              prior_centeroids=self.prior_centeroids[x.device.index][start_id: end_id], cfg=self.cfg)
+                  deform.append(d)
                 else:
-                    l, c = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                             prior_centeroids=self.prior_centeroids[x.device.index][start_id: end_id], cfg=self.cfg)
+                  l, c = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
+                           prior_centeroids=self.prior_centeroids[x.device.index][start_id: end_id], cfg=self.cfg)
                 start_id = end_id
                 loc.append(l.permute(0, 2, 3, 1).contiguous())
                 conf.append(c.permute(0, 2, 3, 1).contiguous())
@@ -272,6 +273,7 @@ class DetectionHeader(nn.Module):
         if verbose:
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
         if self.deformation:
+            self.deformation_source = "geometric"
             if self.deformation_source.lower() == "input":
                 _deform_map = [offset(x) for offset in self.offset_groups]
             elif self.deformation_source.lower() == "regression":
@@ -287,7 +289,12 @@ class DetectionHeader(nn.Module):
                     _reg = decode(reg.permute(0, 2, 3, 1).contiguous().view(-1, 4),
                                   prior.repeat(x.size(0), 1), cfg["variance"]).clamp(min=0, max=1)
                     reg_center = center_conv_point(_reg)
-                    _deform_map.append((reg_center - prior_center).view(x.size(0), reg.size(2), reg.size(3), -1).permute(0, 3, 1, 2))
+                    # print(_reg[0, :].data, point_form(prior[0:1, :]).clamp(min=0, max=1).data)
+                    # TODO: In the future work, when input image is not square, we need
+                    # TODO: to multiply image with its both width and height
+                    df_map = (reg_center - prior_center) * x.size(2)
+                    _deform_map.append(df_map.view(x.size(0), reg.size(2), reg.size(3), -1)
+                                       .permute(0, 3, 1, 2))
             elif self.deformation_source.lower() == "concate":
                 # TODO: reimplement forward graph
                 raise NotImplementedError()
