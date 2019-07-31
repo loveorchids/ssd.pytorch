@@ -446,15 +446,13 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, reg_boxes, default_bo
             priors = fm_priors[idx, :]
             boxes = fm_reg_boxes[:, idx, :]
 
-            overlaps = jaccard(torch.tensor(ground_truth[:, :-1]).float()/args.img_size,
+            overlaps = jaccard(torch.tensor(ground_truth[:, :-1]).float() / args.img_size,
                                point_form(priors))
             try:
                 matched_idx = [int(_idx) for _idx in torch.sum(overlaps >= 0.5, dim=0).nonzero().squeeze()]
             except TypeError:
                 # Means no priors match the ground truth
                 matched_idx = []
-
-
             d_x = torch.mean(deform[:, 0::2, :, :], dim=1).unsqueeze(1)
             d_y = torch.mean(deform[:, 1::2, :, :], dim=1).unsqueeze(1)
             deform = torch.cat([d_x, d_y], dim=1)
@@ -478,11 +476,11 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, reg_boxes, default_bo
                 # Draw prediction on image
                 for pred in pred_boxes:
                     x1, y1, x2, y2 = norm(pred[0]), norm(pred[1]), norm(pred[2]), norm(pred[3])
-                    cv2.rectangle(img, (x1, y1), (x2, y2), (33, 179, 125), 1)
+                    cv2.rectangle(img, (x1, y1), (x2, y2), (94, 218, 250), 1)
                 # Draw Ground Truth on image
                 for gt in ground_truth:
                     x1, y1, x2, y2 = norm(gt[0]), norm(gt[1]), norm(gt[2]), norm(gt[3])
-                    cv2.rectangle(img, (x1, y1), (x2, y2), (33, 235, 63), 1)
+                    cv2.rectangle(img, (x1, y1), (x2, y2), (33, 235, 63), 2)
 
 
                 gifs = []
