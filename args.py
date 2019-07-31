@@ -65,8 +65,7 @@ def prepare_args(root_dir):
                         help='Batch size for training')
     parser.add_argument('--max_iter', default=20010, type=int,
                         help='iteration times for training')
-    parser.add_argument('--resume', default=None, type=str,
-                        help='Checkpoint state_dict file to resume training from')
+    parser.add_argument('--resume', action="store_true", help="finetuning")
     parser.add_argument('--start_iter', default=0, type=int,
                         help='Resume training at this iter')
     parser.add_argument('--num_workers', default=6, type=int,

@@ -71,8 +71,8 @@ class MultiBoxLoss(nn.Module):
         for idx in range(num):
             truths = targets[idx][:, :-1].data
             labels = targets[idx][:, -1].data
-            defaults = priors.data
-            #defaults = decode(loc_data[idx], priors.data, self.variance)
+            #defaults = priors.data
+            defaults = center_size(decode(loc_data[idx], priors.data, self.variance).clamp(min=0, max=1))
             match(self.threshold, truths, defaults, self.variance, labels,
                   loc_t, conf_t, idx)
         if self.use_gpu:

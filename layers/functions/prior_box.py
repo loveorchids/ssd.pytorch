@@ -52,5 +52,6 @@ class PriorBox(object):
         # back to torch land
         output = torch.Tensor(mean).view(-1, 4)
         if self.clip:
-            output.clamp_(max=1, min=0)
+            output = center_size(point_form(output).clamp(max=1, min=0))
+            #output.clamp_(max=1, min=0)
         return output
