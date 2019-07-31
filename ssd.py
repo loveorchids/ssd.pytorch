@@ -273,7 +273,6 @@ class DetectionHeader(nn.Module):
         if verbose:
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
         if self.deformation:
-            self.deformation_source = "geometric"
             if self.deformation_source.lower() == "input":
                 _deform_map = [offset(x) for offset in self.offset_groups]
             elif self.deformation_source.lower() == "regression":
