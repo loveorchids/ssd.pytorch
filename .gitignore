@@ -133,3 +133,4 @@ data/VOCdevkit/
 eval
 .ipynb_checkpoints
 *.sh
+experiments/
