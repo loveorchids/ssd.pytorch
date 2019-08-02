@@ -87,7 +87,7 @@ def train():
         optimizer = optim.SGD(net.parameters(), lr=args.lr,  momentum=args.momentum,
                                weight_decay=args.weight_decay)
     criterion = MultiBoxLoss(cfg['num_classes'], args.overlap_threshold, True, 0,
-                             True, 3, 0.5, False, args.cuda)
+                             True, 3, 0.5, False, args.cuda, rematch=args.rematch)
 
     net.train()
     # loss counters
@@ -138,17 +138,16 @@ def train():
             batch_iterator = iter(data_loader)
             images, targets = next(batch_iterator)
         t0 = time.time()
-        if args.cuda:
-            images = Variable(images.cuda())
-            targets = [Variable(ann.cuda(), volatile=True) for ann in targets]
-        else:
-            images = Variable(images)
-            targets = [Variable(ann, volatile=True) for ann in targets]
+        images = images.cuda()
+        targets = [ann.cuda() for ann in targets]
+        targets_idx = [ann.size(0) for ann in targets]
+        targets_idx = torch.cuda.LongTensor([sum(targets_idx[:_idx]) for _idx in range(len(targets_idx))]).unsqueeze(-1)
+        #targets = torch.cat(targets, dim=0).cuda()
         # forward
-        out = net(images)
+        loss_l, loss_c = net(images, targets, idx=targets_idx)
         # backprop
         optimizer.zero_grad()
-        loss_l, loss_c = criterion(out, targets)
+        #loss_l, loss_c = criterion(out, targets)
         loss = loss_l + loss_c
         loss.backward()
         optimizer.step()

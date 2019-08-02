@@ -99,11 +99,14 @@ def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx):
     best_truth_overlap.squeeze_(0)
     best_prior_idx.squeeze_(1)
     best_prior_overlap.squeeze_(1)
-    best_truth_overlap.index_fill_(0, best_prior_idx, 2)  # ensure best prior
-    # TODO refactor: index best_prior_idx with long tensor
+    best_truth_idx[best_prior_idx] = torch.arange(best_prior_idx.size(0))
+    #print(best_truth_idx[best_prior_idx])
+    #best_truth_overlap.index_fill_(0, best_prior_idx, 2)  # ensure best prior
     # ensure every gt matches with its prior of max overlap
-    for j in range(best_prior_idx.size(0)):
-        best_truth_idx[best_prior_idx[j]] = j
+    #for j in range(best_prior_idx.size(0)):
+        #best_truth_idx[best_prior_idx[j]] = j
+    #print(best_truth_idx[best_prior_idx])
+    #print("")
     matches = truths[best_truth_idx]          # Shape: [num_priors,4]
     conf = labels[best_truth_idx] + 1         # Shape: [num_priors]
     conf[best_truth_overlap < threshold] = 0  # label as background

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -33,7 +32,7 @@ class MultiBoxLoss(nn.Module):
 
     def __init__(self, num_classes, overlap_thresh, prior_for_matching,
                  bkg_label, neg_mining, neg_pos, neg_overlap, encode_target,
-                 use_gpu=True):
+                 use_gpu=True, rematch=False):
         super(MultiBoxLoss, self).__init__()
         self.use_gpu = use_gpu
         self.num_classes = num_classes
@@ -45,6 +44,7 @@ class MultiBoxLoss(nn.Module):
         self.negpos_ratio = neg_pos
         self.neg_overlap = neg_overlap
         self.variance = cfg['variance']
+        self.rematch = rematch
 
     def forward(self, predictions, targets):
         """Multibox Loss
@@ -59,28 +59,27 @@ class MultiBoxLoss(nn.Module):
                 shape: [batch_size,num_objs,5] (last idx is the label).
         """
         loc_data, conf_data, priors = predictions
-        num = loc_data.size(0)
+        batch_num = loc_data.size(0)
         priors = priors[loc_data.device.index][:loc_data.size(1), :]
         num_priors = (priors.size(0))
         num_classes = self.num_classes
 
         # match priors (default boxes) and ground truth boxes
-        loc_t = torch.Tensor(num, num_priors, 4)
-        conf_t = torch.LongTensor(num, num_priors)
+        loc_t = torch.cuda.FloatTensor(batch_num, num_priors, 4)
+        conf_t = torch.cuda.LongTensor(batch_num, num_priors)
 
-        for idx in range(num):
+        for idx in range(batch_num):
             truths = targets[idx][:, :-1].data
             labels = targets[idx][:, -1].data
-            #defaults = priors.data
-            defaults = center_size(decode(loc_data[idx], priors.data, self.variance).clamp(min=0, max=1))
+            if self.rematch:
+                defaults = center_size(decode(loc_data[idx], priors.data, self.variance).clamp(min=0, max=1))
+            else:
+                defaults = priors.data
             match(self.threshold, truths, defaults, self.variance, labels,
                   loc_t, conf_t, idx)
-        if self.use_gpu:
-            loc_t = loc_t.cuda()
-            conf_t = conf_t.cuda()
         # wrap targets
-        loc_t = Variable(loc_t, requires_grad=False)
-        conf_t = Variable(conf_t, requires_grad=False)
+        #loc_t = Variable(loc_t, requires_grad=False)
+        #conf_t = Variable(conf_t, requires_grad=False)
 
         pos = conf_t > 0
         num_pos = pos.sum(dim=1, keepdim=True)
@@ -99,7 +98,7 @@ class MultiBoxLoss(nn.Module):
         loss_c = log_sum_exp(batch_conf) - batch_conf.gather(1, conf_t.view(-1, 1))
 
         # Hard Negative Mining
-        loss_c = loss_c.view(num, -1)
+        loss_c = loss_c.view(batch_num, -1)
         loss_c[pos] = 0  # filter out pos boxes for now
         
         _, loss_idx = loss_c.sort(1, descending=True)

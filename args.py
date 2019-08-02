@@ -52,10 +52,14 @@ def prepare_args(root_dir):
     parser.add_argument('--deform_offset_dilation', default=1, type=int,
                         help='allow bias or not')
     parser.add_argument("--top_k", type=int, help="detector top_k", default=200)
-    parser.add_argument("--conf_threshold", type=float, help="detector_conf_threshold", default=0.01)
-    parser.add_argument("--nms_threshold", type=float, help="detector_nms_threshold", default=0.45)
+    parser.add_argument("--conf_threshold", type=float, default=0.01,
+                        help="detector_conf_threshold")
+    parser.add_argument("--nms_threshold", type=float, default=0.45,
+                        help="detector_nms_threshold")
     parser.add_argument('--overlap_threshold', type=float, default=0.5,
                         help='overlap threshold to match prior to ground truth')
+    parser.add_argument("--rematch", action="store_true",
+                        help="if true, we will use the regressed box produced by localizer to calculate the loss.")
 
 
     # Training Parameter
@@ -85,8 +89,10 @@ def prepare_args(root_dir):
 
 
     # Evaluation Parameter
-    parser.add_argument('-vd', '--visualize_deformation', default=False, type=str2bool,
+    parser.add_argument('-vd', '--visualize_deformation', action="store_true",
                         help="visualize deformation or not")
+    parser.add_argument('--visualize_gif', action="store_true",
+                        help="visualize detection process as gif or not")
     parser.add_argument('--cuda_id', default=2, type=int,
                         help='device id of test')
 

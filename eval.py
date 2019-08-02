@@ -446,8 +446,12 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, reg_boxes, default_bo
             priors = fm_priors[idx, :]
             boxes = fm_reg_boxes[:, idx, :]
 
-            overlaps = jaccard(torch.tensor(ground_truth[:, :-1]).float() / args.img_size,
-                               point_form(priors))
+            if args.rematch:
+                overlaps = jaccard(torch.tensor(ground_truth[:, :-1]).float() / args.img_size,
+                                   boxes.squeeze(0).data)
+            else:
+                overlaps = jaccard(torch.tensor(ground_truth[:, :-1]).float() / args.img_size,
+                                   point_form(priors))
             try:
                 matched_idx = [int(_idx) for _idx in torch.sum(overlaps >= 0.5, dim=0).nonzero().squeeze()]
             except TypeError:
@@ -476,12 +480,11 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, reg_boxes, default_bo
                 # Draw prediction on image
                 for pred in pred_boxes:
                     x1, y1, x2, y2 = norm(pred[0]), norm(pred[1]), norm(pred[2]), norm(pred[3])
-                    cv2.rectangle(img, (x1, y1), (x2, y2), (94, 218, 250), 1)
+                    cv2.rectangle(img, (x1, y1), (x2, y2), (94, 218, 250), 2)
                 # Draw Ground Truth on image
                 for gt in ground_truth:
                     x1, y1, x2, y2 = norm(gt[0]), norm(gt[1]), norm(gt[2]), norm(gt[3])
                     cv2.rectangle(img, (x1, y1), (x2, y2), (33, 235, 63), 2)
-
 
                 gifs = []
                 for k, x in enumerate(x_coords):
@@ -502,19 +505,24 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, reg_boxes, default_bo
                     # Draw Regressed Boxes
                     x1, y1, x2, y2 = (box[k].clamp(min=0, max=1) * args.img_size).long().cpu().numpy()
                     cv2.rectangle(_img, (x1, y1), (x2, y2), (70, 67, 238), 1)
-                    gifs.append(_img[:, :, [2, 1, 0]])
+                    if args.visualize_gif:
+                        gifs.append(_img[:, :, [2, 1, 0]])
                 per_batch.append(img)
                 #for _idx, img in enumerate(gifs):
                     #cv2.imwrite("/home/wang/Pictures/tmp_%s.jpg"%str(_idx).zfill(4), img)
                 if not os.path.exists(img_path):
                     os.mkdir(img_path)
-                imageio.mimsave(os.path.join(
-                    img_path, 'fm_%s_asr_%s.gif'%(cfg["feature_maps"][i], _d)), gifs)
+                if args.visualize_gif:
+                    imageio.mimsave(
+                        os.path.join(img_path, 'fm_%s_asr_%s.gif'%(cfg["feature_maps"][i], _d)),
+                        gifs)
             per_ratio.append(per_batch)
         per_ratio = list(map(list, zip(*per_ratio)))
         for batch_id, ratio in enumerate(per_ratio):
-            img = np.concatenate(ratio, axis=1)
-            name = "batch_%d_fm_%s.jpg"%(batch_id, fm_size[i])
+            odd_ratio = np.concatenate([r for i, r in enumerate(ratio) if i % 2 == 1], axis=1)
+            even_ratio = np.concatenate([r for i, r in enumerate(ratio) if i % 2 == 0], axis=1)
+            img = np.concatenate([odd_ratio, even_ratio], axis=0)
+            name = "iter_%s_fm_%s.jpg"%(str(args.iter).zfill(5), str(fm_size[i]).zfill(2))
             cv2.imwrite(os.path.join(img_path, name), img)
 
 
