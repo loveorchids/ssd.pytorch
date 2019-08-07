@@ -54,7 +54,6 @@ class SSD(nn.Module):
         elif args.implementation == "vanilla":
             self.loc = nn.ModuleList(head[0])
             self.conf = nn.ModuleList(head[1])
-
         #self.criterion = MultiBoxLoss(self.cfg['num_classes'], args.overlap_threshold, True, 0,
                                  #True, 3, 0.5, False, args.cuda, rematch=args.rematch)
         if phase == 'test':
@@ -110,17 +109,17 @@ class SSD(nn.Module):
             start_id = 0
             for idx, (x, h) in enumerate(zip(sources, self.header)):
                 end_id = start_id + x.size(2) * x.size(3) * (2 + 2 * len(self.cfg["aspect_ratios"][idx]))
-                if self.deformation_source.lower() == "geometric_v2":
+                if self.args.deformation_source.lower() == "geometric_v2":
                     centeroid = self.rf_prior_centeroids
                 else:
                     centeroid = self.prior_centeroids
                 if deform_map:
                   l, c, d = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                              prior_centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
+                              centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
                   deform.append(d)
                 else:
                   l, c = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                           prior_centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
+                           centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
                 start_id = end_id
                 loc.append(l.permute(0, 2, 3, 1).contiguous())
                 conf.append(c.permute(0, 2, 3, 1).contiguous())
@@ -293,7 +292,7 @@ class DetectionHeader(nn.Module):
                 _deform_map = [offset(x) for offset in self.offset_groups]
             elif self.deformation_source.lower() == "regression":
                 _deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
-            elif self.deformation_source.lower() == "geometric":
+            elif self.deformation_source.lower() in ["geometric", "geometric_v2"]:
                 _deform_map = []
                 for i, reg in enumerate(regression):
                     # get the index of certain ratio from prior box
@@ -306,7 +305,7 @@ class DetectionHeader(nn.Module):
                     # print(_reg[0, :].data, point_form(prior[0:1, :]).clamp(min=0, max=1).data)
                     # TODO: In the future work, when input image is not square, we need
                     # TODO: to multiply image with its both width and height
-                    df_map = (reg_center - prior_center) * (self.img_size - x.size(2))
+                    df_map = (reg_center - prior_center) * x.size(2)
                     _deform_map.append(df_map.view(x.size(0), reg.size(2), reg.size(3), -1)
                                        .permute(0, 3, 1, 2))
             elif self.deformation_source.lower() == "concate":

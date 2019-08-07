@@ -59,7 +59,7 @@ def train():
         cudnn.benchmark = True
 
     if args.resume:
-        model_name = "%s_%s_%s.pth"%(args.name, args.img_size, args.start_iter)
+        model_name = "%s_%s_%s.pth"%(args.basenet, args.img_size, args.ft_iter)
         print('Resuming training from %s...'%(model_name))
         weights = torch.load(os.path.join(args.save_folder, model_name))
         ssd_net.load_state_dict(weights)

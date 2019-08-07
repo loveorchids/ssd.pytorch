@@ -63,15 +63,19 @@ def prepare_args(root_dir):
 
 
     # Training Parameter
+    parser.add_argument('--resume', action="store_true", help="finetuning")
     parser.add_argument('--basenet', default='vgg16_reducedfc.pth',
                         help='Pretrained base model')
-    parser.add_argument('--batch_size', default=96, type=int,
-                        help='Batch size for training')
-    parser.add_argument('--max_iter', default=20010, type=int,
-                        help='iteration times for training')
-    parser.add_argument('--resume', action="store_true", help="finetuning")
+
+    parser.add_argument('--ft_iter', default=0, type=int,
+                        help='decide which should be loaded')
     parser.add_argument('--start_iter', default=0, type=int,
                         help='Resume training at this iter')
+    parser.add_argument('--max_iter', default=20010, type=int,
+                        help='iteration times for training')
+
+    parser.add_argument('--batch_size', default=96, type=int,
+                        help='Batch size for training')
     parser.add_argument('--num_workers', default=6, type=int,
                         help='Number of workers used in dataloading')
 

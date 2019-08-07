@@ -35,6 +35,7 @@ class ReceptiveFieldPrior(object):
 
 
 if __name__ == "__main__":
+    from .prior_box import PriorBox
     cfg = {
         'num_classes': 21,
         'lr_steps': (80000, 100000, 120000),
