@@ -140,14 +140,15 @@ def train():
         t0 = time.time()
         images = images.cuda()
         targets = [ann.cuda() for ann in targets]
-        targets_idx = [ann.size(0) for ann in targets]
-        targets_idx = torch.cuda.LongTensor([sum(targets_idx[:_idx]) for _idx in range(len(targets_idx))]).unsqueeze(-1)
+
+        #targets_idx = [ann.size(0) for ann in targets]
+        #targets_idx = torch.cuda.LongTensor([sum(targets_idx[:_idx]) for _idx in range(len(targets_idx))]).unsqueeze(-1)
         #targets = torch.cat(targets, dim=0).cuda()
         # forward
-        loss_l, loss_c = net(images, targets, idx=targets_idx)
+        out = net(images)#, targets, targets_idx)
         # backprop
         optimizer.zero_grad()
-        #loss_l, loss_c = criterion(out, targets)
+        loss_l, loss_c = criterion(out, targets)
         loss = loss_l + loss_c
         loss.backward()
         optimizer.step()

@@ -31,11 +31,16 @@ class SSD(nn.Module):
         self.phase = phase
         self.num_classes = num_classes
         self.cfg = (coco, voc)[num_classes == 21]
-        self.priorbox = PriorBox(self.cfg)
-        prior = self.priorbox.forward()
+        priorBox = PriorBox(self.cfg)
+        rf_Box = ReceptiveFieldPrior(self.cfg)
+        prior = priorBox.forward()
+        rf_prior = rf_Box.forward()
         self.priors = [prior.cuda(i) for i in range(torch.cuda.device_count())]
+        self.rf_priors = [rf_prior.cuda(i) for i in range(torch.cuda.device_count())]
         self.prior_centeroids = [center_conv_point(point_form(prior).clamp(min=0, max=1))
                                  for prior in self.priors]
+        self.rf_prior_centeroids = [center_conv_point(point_form(rf_prior))
+                                 for rf_prior in self.rf_priors]
         self.size = size
         self.args = args
         # SSD network
@@ -50,14 +55,14 @@ class SSD(nn.Module):
             self.loc = nn.ModuleList(head[0])
             self.conf = nn.ModuleList(head[1])
 
-        self.criterion = MultiBoxLoss(self.cfg['num_classes'], args.overlap_threshold, True, 0,
-                                 True, 3, 0.5, False, args.cuda, rematch=args.rematch)
+        #self.criterion = MultiBoxLoss(self.cfg['num_classes'], args.overlap_threshold, True, 0,
+                                 #True, 3, 0.5, False, args.cuda, rematch=args.rematch)
         if phase == 'test':
             self.softmax = nn.Softmax(dim=-1)
             self.detect = Detect(num_classes, bkg_label=0, top_k=args.top_k,
                                  conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
 
-    def forward(self, x, y=None, idx=None, deform_map=False):
+    def forward(self, x, y=None, y_idx=None, deform_map=False):
         """Applies network layers and ops on input image(s) x.
 
         Args:
@@ -105,13 +110,17 @@ class SSD(nn.Module):
             start_id = 0
             for idx, (x, h) in enumerate(zip(sources, self.header)):
                 end_id = start_id + x.size(2) * x.size(3) * (2 + 2 * len(self.cfg["aspect_ratios"][idx]))
+                if self.deformation_source.lower() == "geometric_v2":
+                    centeroid = self.rf_prior_centeroids
+                else:
+                    centeroid = self.prior_centeroids
                 if deform_map:
                   l, c, d = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                              prior_centeroids=self.prior_centeroids[x.device.index][start_id: end_id], cfg=self.cfg)
+                              prior_centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
                   deform.append(d)
                 else:
                   l, c = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                           prior_centeroids=self.prior_centeroids[x.device.index][start_id: end_id], cfg=self.cfg)
+                           prior_centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
                 start_id = end_id
                 loc.append(l.permute(0, 2, 3, 1).contiguous())
                 conf.append(c.permute(0, 2, 3, 1).contiguous())
@@ -139,10 +148,13 @@ class SSD(nn.Module):
                 conf.view(conf.size(0), -1, self.num_classes),
                 self.priors
             )
-
-            loss_l, loss_c = self.criterion(output, y)
-            print(loss_l, loss_c)
-            return loss_l.unsqueeze(0), loss_c.unsqueeze(0)
+        if deform_map:
+            return output, deform
+        else:
+            return output
+            #loss_l, loss_c = self.criterion(output, y)
+            #print(loss_l, loss_c)
+            #return loss_l.unsqueeze(0), loss_c.unsqueeze(0)
 
     def load_weights(self, base_file):
         other, ext = os.path.splitext(base_file)
@@ -226,18 +238,19 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
 
 
 class DetectionHeader(nn.Module):
-    def __init__(self, in_channel, ratios, num_classes, opt):
+    def __init__(self, in_channel, ratios, num_classes, opt, ):
         super().__init__()
         self.kernel_wise_deform = opt.kernel_wise_deform
         self.deformation_source = opt.deformation_source
         self.kernel_size = 3
         self.deformation = opt.deformation
+        self.img_size = opt.img_size
 
         self.loc_layers = nn.ModuleList([])
         for i in range(ratios):
             self.loc_layers.append(nn.Conv2d(in_channel, 4, kernel_size=3, padding=1))
 
-        if opt.deformation and opt.deformation_source.lower() != "geometric":
+        if opt.deformation and opt.deformation_source.lower() not in ["geometric", "geometric_v2"]:
             self.offset_groups = nn.ModuleList([])
             if opt.deformation_source.lower() == "input":
                 # Previous version, represent deformation_source is True
@@ -247,8 +260,6 @@ class DetectionHeader(nn.Module):
                 offset_in_channel = 4
             elif opt.deformation_source.lower() == "concate":
                 offset_in_channel = in_channel + 4
-            elif opt.deformation_source.lower() == "geometric":
-                raise ArithmeticError()
             else:
                 raise NotImplementedError()
             if opt.kernel_wise_deform:
@@ -270,7 +281,7 @@ class DetectionHeader(nn.Module):
                 _deform = nn.Conv2d(in_channel, num_classes, kernel_size=3, padding=1)
             self.conf_layers.append(_deform)
 
-    def forward(self, x, h, verbose=False, deform_map=False, priors=None, prior_centeroids=None, cfg=None):
+    def forward(self, x, h, verbose=False, deform_map=False, priors=None, centeroids=None, cfg=None):
         # regression is a list, the length of regression equals to the number different aspect ratio
         # under current receptive field, elements of regression are PyTorch Tensor, encoded in
         # point-form, represent the regressed prior boxes.
@@ -283,20 +294,19 @@ class DetectionHeader(nn.Module):
             elif self.deformation_source.lower() == "regression":
                 _deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
             elif self.deformation_source.lower() == "geometric":
-                if priors is None:
-                    raise TypeError("prior should not be none if the deformation source is geometric")
                 _deform_map = []
                 for i, reg in enumerate(regression):
+                    # get the index of certain ratio from prior box
                     idx = torch.tensor([i + len(regression) * _ for _ in range(reg.size(2) * reg.size(3))]).long()
                     prior = priors[idx, :]
-                    prior_center = prior_centeroids[idx, :].repeat(x.size(0), 1)
+                    prior_center = centeroids[idx, :].repeat(x.size(0), 1)
                     _reg = decode(reg.permute(0, 2, 3, 1).contiguous().view(-1, 4),
                                   prior.repeat(x.size(0), 1), cfg["variance"]).clamp(min=0, max=1)
                     reg_center = center_conv_point(_reg)
                     # print(_reg[0, :].data, point_form(prior[0:1, :]).clamp(min=0, max=1).data)
                     # TODO: In the future work, when input image is not square, we need
                     # TODO: to multiply image with its both width and height
-                    df_map = (reg_center - prior_center) * x.size(2)
+                    df_map = (reg_center - prior_center) * (self.img_size - x.size(2))
                     _deform_map.append(df_map.view(x.size(0), reg.size(2), reg.size(3), -1)
                                        .permute(0, 3, 1, 2))
             elif self.deformation_source.lower() == "concate":
