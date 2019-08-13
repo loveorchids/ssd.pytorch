@@ -34,13 +34,9 @@ def fit(args, cfg, net, dataset, optimizer, is_train=True):
         Loss_L, Loss_C = [], []
     else:
         net.eval()
-        all_boxes = [[[] for _ in range(len(dataset))] for _ in range(21)]
         eval_results = []
     start_time = time.time()
-    for batch_idx, (images, targets, h, w) in enumerate(dataset):
-        print(batch_idx)
-        if batch_idx >= 5:
-            break
+    for batch_idx, (images, targets, img_shape) in enumerate(dataset):
         # if not net.fix_size:
         # assert images.size(0) == 1, "batch size for dynamic input shape can only be 1 for 1 GPU RIGHT NOW!"
         if len(targets) == 0:
@@ -68,24 +64,6 @@ def fit(args, cfg, net, dataset, optimizer, is_train=True):
             # Turn the input param detector into None so as to
             # Experiment with Detector's Hyper-parameters
             detections, reg_boxes = out1
-            for i in range(detections.size(0)):
-                detection = detections[i].data
-                for j in range(1, detection.size(0)):
-                    dets = detection[j]
-                    mask = dets[:, 0].gt(0.).expand(5, dets.size(0)).t()
-                    dets = torch.masked_select(dets, mask).view(-1, 5)
-                    if dets.size(0) == 0:
-                        continue
-                    boxes = dets[:, 1:]
-                    boxes[:, 0] *= w
-                    boxes[:, 2] *= w
-                    boxes[:, 1] *= h
-                    boxes[:, 3] *= h
-                    scores = dets[:, 0].cpu().numpy()
-                    cls_dets = np.hstack((boxes.cpu().numpy(),
-                                          scores[:, np.newaxis])).astype(np.float32,
-                                                                         copy=False)
-                    all_boxes[j][batch_idx * torch.cuda.device_count() + i] = cls_dets
             eval_result = evaluate(images, detections.data, targets, batch_idx, 0.1,
                                    visualize=False, post_combine=True)
             eval_results.append(eval_result)
@@ -102,9 +80,9 @@ def fit(args, cfg, net, dataset, optimizer, is_train=True):
         # represent accuracy, precision, recall, f1_score
         return avg(eval_results[0]), avg(eval_results[1]), avg(eval_results[2]), avg(eval_results[3])
 
-def val(args, cfg, net, dataset, optimizer, is_train=False):
+def val(args, cfg, net, dataset, optimizer):
     with torch.no_grad():
-        test_net(None, net, None, dataset, None, None)
+        return fit(args, cfg, net, dataset, optimizer, is_train=False)
 
 def evaluate(img, detections, targets, batch_idx, threshold, visualize=False, post_combine=False):
     eval_result = {}
@@ -112,7 +90,6 @@ def evaluate(img, detections, targets, batch_idx, threshold, visualize=False, po
     w = img.size(3)
     h = img.size(2)
     accu, pre, rec, f1 = [], [], [], []
-
     for i in range(detections.size(0)):
         gt_cls = targets[i][:, -1].data
         tar = targets[i][:, :-1].data
@@ -124,15 +101,15 @@ def evaluate(img, detections, targets, batch_idx, threshold, visualize=False, po
         for j in range(1, detections.size(1)):
             idx = detections[i, j, :, 0] >= threshold
             boxes = detections[i, j, idx, 1:]
-
-            if boxes.size(0) == 0 and len(gt_boxes[j]) == 0:
+            if boxes.size(0) == 0 and len(gt_boxes[j-1]) == 0:
                 continue
-            elif boxes.size(0) != 0 and len(gt_boxes[j]) == 0:
-                accuracy, precision, recall, f1_score = 0, 0, 0, 0
-            elif boxes.size(0) == 0 and len(gt_boxes[j]) != 0:
-                accuracy, precision, recall, f1_score = 0, 0, 0, 0
+            elif boxes.size(0) != 0 and len(gt_boxes[j-1]) == 0:
+                accuracy, precision, recall, f1_score = 0, 0, 1, 0
+            elif boxes.size(0) == 0 and len(gt_boxes[j-1]) != 0:
+                accuracy, precision, recall, f1_score = 0, 1, 0, 0
             else:
-                jac = jaccard(boxes, gt_boxes[j])
+                gt = torch.stack(gt_boxes[j - 1], 0)
+                jac = jaccard(boxes, gt)
                 overlap, idx = jac.max(1, keepdim=True)
                 # This is not DetEval
                 positive_pred = boxes[overlap.squeeze(1) > 0.5]
@@ -142,7 +119,7 @@ def evaluate(img, detections, targets, batch_idx, threshold, visualize=False, po
                 #print_box(blue_boxes=positive_pred, green_boxes=gt_boxes, red_boxes=negative_pred,
                           #img=vb.plot_tensor(args, img, margin=0), save_dir=save_dir)
 
-                accuracy, precision, recall = measure(positive_pred, [j], width=w, height=h)
+                accuracy, precision, recall = measure(positive_pred, gt, width=w, height=h)
                 if (recall + precision) < 1e-3:
                     f1_score = 0
                 else:
@@ -218,7 +195,7 @@ def main():
         val_set = VOCDetection(args.voc_root, [('2007', "test")],
                                BaseTransform(args.img_size, (104, 117, 123)),
                                VOCAnnotationTransform())
-        val_set = data.DataLoader(val_set, torch.cuda.device_count(),
+        val_set = data.DataLoader(val_set, args.batch_size,
                                     num_workers=args.num_workers,
                                     shuffle=False, collate_fn=detection_collate,
                                     pin_memory=True)
@@ -264,19 +241,15 @@ def main():
         conf_loss.append(conf_avg)
         train_losses = [np.asarray(loc_loss), np.asarray(conf_loss)]
         if val_set is not None and epoch != 0 and epoch % 5 == 0:
+            #fit(args, cfg, net, val_set, optimizer, is_train=False)
             val(args, cfg, net, val_set, optimizer)
-        if epoch != 0 and epoch % 10 == 0:
+        if epoch != 0 and epoch % 5 == 0:
             torch.save(net.state_dict(),
                        os.path.join(args.save_folder, '%s_%s_%s.pth' %
                                     (args.name, args.img_size, epoch)))
         if epoch > 5:
-            vb.plot_multi_loss_distribution(
-                multi_line_data=[train_losses],
-                multi_line_labels=[["location", "confidence"]],
-                save_path=args.val_log, window=5, name=dt,
-                bound=[{"low": 0.0, "high": 3.0}],
-                titles=["Train Loss"]
-            )
+            vb.plot_curves(train_losses, ["location", "confidence"], save_path=args.val_log, name=dt,
+                window=5, fig_size=(18, 6), bound={"low": 0.0, "high": 3.0}, title="Train Loss")
 
 if __name__ == '__main__':
     main()

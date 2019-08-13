@@ -322,8 +322,8 @@ def voc_eval(detpath, annopath, imagesetfile, classname, cachedir, ovthresh=0.5,
 def test_net(save_folder, net, cuda, dataset, transform, top_k,
              im_size=300, thresh=0.05):
 
-    detector = Detect(num_classes, bkg_label=0, top_k=args.top_k,
-                         conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
+    #detector = Detect(num_classes, bkg_label=0, top_k=args.top_k,
+                         #conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
 
     num_images = len(dataset)
     all_boxes = [[[] for _ in range(num_images)]
@@ -347,7 +347,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         if args.cuda:
             x = x.cuda()
         #_t['im_detect'].tic()
-        out, deform_pyramid = net(x, deform_map=args.visualize_deformation, test=True)
+        out, deform_pyramid = net(x, y=None, y_idx=None, deform_map=args.visualize_deformation, test=True)
         # reg_boxes and pred_box are in point form
         detections, reg_boxes = out
         detections = detections.data

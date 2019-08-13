@@ -7,6 +7,8 @@ from layers.box_utils import *
 from data import voc, coco
 import os
 import mmdet.ops.dcn as dcn
+import numpy as np
+import cv2
 
 class SSD(nn.Module):
     """Single Shot Multibox Architecture
@@ -292,10 +294,15 @@ class DetectionHeader(nn.Module):
                     _reg = decode(reg.permute(0, 2, 3, 1).contiguous().view(-1, 4),
                                   prior.repeat(x.size(0), 1), cfg["variance"]).clamp(min=0, max=1)
                     reg_center = center_conv_point(_reg)
+                    #if x.size(2) <= 10:
+                        #visualize_box_and_center(_reg.view(x.size(0), reg.size(2) * reg.size(3), -1)[0], centeroids[idx, :],
+                                                 #reg_center.view(x.size(0), reg.size(2) * reg.size(3), -1)[0])
                     # print(_reg[0, :].data, point_form(prior[0:1, :]).clamp(min=0, max=1).data)
                     # TODO: In the future work, when input image is not square, we need
                     # TODO: to multiply image with its both width and height
                     df_map = (reg_center - prior_center) * x.size(2)
+                    if x.size(2) <= 10:
+                        visualize_box_and_center(_reg.view(x.size(0), reg.size(2) * reg.size(3), -1)[0], centeroids[idx, :])
                     _deform_map.append(df_map.view(x.size(0), reg.size(2), reg.size(3), -1)
                                        .permute(0, 3, 1, 2))
             elif self.deformation_source.lower() == "concate":
@@ -322,6 +329,28 @@ class DetectionHeader(nn.Module):
             return torch.cat(regression, dim=1), torch.cat(pred, dim=1), _deform_map
         else:
             return torch.cat(regression, dim=1), torch.cat(pred, dim=1)
+
+def visualize_box_and_center(box, centeroid, reg_center, img_size=300):
+    """
+    :param box: shape=(?, 4)
+    :param centeroid: shape=(?, 18)
+    :return:
+    """
+    box = box * img_size
+    centeroid = centeroid * img_size
+    reg_center = reg_center * img_size
+    for i in range(box.size(0)):
+        canvas = np.ones((img_size, img_size, 3)) * 200
+        x1, y1, x2, y2 = box[i].tolist()
+        points = centeroid[i].view(-1, 2).tolist()
+        reg_points = reg_center[i].view(-1, 2).tolist()
+        cv2.rectangle(canvas, (round(x1), round(y1)), (round(x2), round(y2)), (255, 0, 0), 2)
+        for point in points:
+            cv2.circle(canvas, (round(point[0]), round(point[1])), 2, (0, 0, 255), 1)
+        for point in reg_points:
+            cv2.circle(canvas, (round(point[0]), round(point[1])), 2, (0, 255, 0), 1)
+        cv2.imwrite("/home/wang/Pictures/tmp_%s.jpg"%str(i).zfill(3), canvas)
+
 
 
 base = {
