@@ -254,3 +254,49 @@ def center_conv_point(bboxes, kernel_size=3, c_min=0, c_max=1):
                          dim=-1)
     center = torch.cat([center] * (kernel_size ** 2), dim=1)
     return base + center * multiplier
+
+
+def measure(pred_boxes, gt_boxes, width, height):
+    if gt_boxes.size(0) == 0 and pred_boxes.size(0) == 0:
+        return 1.0, 1.0, 1.0
+    elif gt_boxes.size(0) == 0 and pred_boxes.size(0) != 0:
+        return 0.0, 0.0, 0.0
+    elif gt_boxes.size(0) != 0 and pred_boxes.size(0) == 0:
+        return 0.0, 0.0, 0.0
+    else:
+        """
+        scale = torch.Tensor([width, height, width, height])
+        canvas_p, canvas_g = [torch.zeros(height, width).byte()] * 2
+        if pred_boxes.is_cuda or gt_boxes.is_cuda:
+            scale = scale.cuda()
+            canvas_p = canvas_p.cuda()
+            canvas_g = canvas_g.cuda()
+        max_size = max(width, height)
+        scaled_p = (scale.unsqueeze(0).expand_as(pred_boxes) * pred_boxes).long().clamp_(0, max_size)
+        scaled_g = (scale.unsqueeze(0).expand_as(gt_boxes) * gt_boxes).long().clamp_(0, max_size)
+        for g in scaled_g:
+            canvas_g[g[0]:g[2], g[1]:g[3]] = 1
+        for p in scaled_p:
+            canvas_p[p[0]:p[2], p[1]:p[3]] = 1
+        inter = canvas_g * canvas_p
+        union = canvas_g + canvas_p >= 1
+
+        vb.plot_tensor(args, inter.permute(1, 0).unsqueeze(0).unsqueeze(0), margin=0, path=PIC+"tmp_inter.jpg")
+        vb.plot_tensor(args, union.permute(1, 0).unsqueeze(0).unsqueeze(0), margin=0, path=PIC+"tmp_union.jpg")
+        vb.plot_tensor(args, canvas_g.permute(1, 0).unsqueeze(0).unsqueeze(0), margin=0, path=PIC+"tmp_gt.jpg")
+        vb.plot_tensor(args, canvas_p.permute(1, 0).unsqueeze(0).unsqueeze(0), margin=0, path=PIC+"tmp_pd.jpg")
+        """
+        inter = intersect(pred_boxes, gt_boxes)
+        text_area = get_box_size(pred_boxes)
+        gt_area = get_box_size(gt_boxes)
+        num_sample = max(text_area.size(0),  gt_area.size(0))
+        accuracy = torch.sum(jaccard(pred_boxes, gt_boxes).max(0)[0]) / num_sample
+        precision = torch.sum(inter.max(1)[0] / text_area) / num_sample
+        recall = torch.sum(inter.max(0)[0] / gt_area) / num_sample
+        return float(accuracy), float(precision), float(recall)
+
+def get_box_size(box):
+    """
+    calculate the bound box size
+    """
+    return (box[:, 2]-box[:, 0]) * (box[:, 3]-box[:, 1])

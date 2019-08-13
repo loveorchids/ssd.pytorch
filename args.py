@@ -99,6 +99,9 @@ def prepare_args(root_dir):
                         help="visualize detection process as gif or not")
     parser.add_argument('--cuda_id', default=2, type=int,
                         help='device id of test')
+    parser.add_argument('--val_log', default="./val", type=str,
+                        help='validation folder location')
+
 
     # Others
     parser.add_argument('--visdom', default=False, type=str2bool,

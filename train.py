@@ -1,9 +1,12 @@
 from data import *
+from layers.box_utils import *
 from utils.augmentations import SSDAugmentation
 from layers.modules import MultiBoxLoss
 from ssd import build_ssd
-import os
+import os, datetime
 import sys
+sys.path.append(os.path.expanduser("~/Documents"))
+import omni_torch.visualize.basic as vb
 import time
 import torch
 from torch.autograd import Variable
@@ -15,163 +18,146 @@ import torch.utils.data as data
 import numpy as np
 from args import prepare_args
 import mmdet.ops.dcn as dcn
+from eval import test_net
 
 args = prepare_args(VOC_ROOT)
-if args.visdom:
-    import visdom
-    viz = visdom.Visdom()
-
+TMPJPG = os.path.expanduser("~/Pictures/tmp.jpg")
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 
+def avg(list):
+    return sum(list) / len(list)
 
-
-def train():
-    if args.dataset == 'COCO':
-        if args.dataset_root == VOC_ROOT:
-            if not os.path.exists(COCO_ROOT):
-                parser.error('Must specify dataset_root if specifying dataset')
-            print("WARNING: Using default COCO dataset_root because " +
-                  "--dataset_root was not specified.")
-            args.dataset_root = COCO_ROOT
-        cfg = coco
-        dataset = COCODetection(root=args.dataset_root,
-                                transform=SSDAugmentation(cfg['min_dim'],
-                                                          MEANS))
-    elif args.dataset == 'VOC':
-        #if args.dataset_root == COCO_ROOT:
-            #parser.error('Must specify dataset if specifying dataset_root')
-        cfg = voc
-        dataset = VOCDetection(root=args.dataset_root,
-                               transform=SSDAugmentation(cfg['min_dim'],
-                                                         MEANS))
-        testset = VOCDetection(args.voc_root, [('2007', "test")],
-                               BaseTransform(args.img_size, (104, 117, 123)),
-                               VOCAnnotationTransform())
-
-
-
-    ssd_net = build_ssd(args, 'train', cfg['min_dim'], cfg['num_classes'])
-    net = ssd_net
-
-    if args.cuda:
-        net = torch.nn.DataParallel(ssd_net)
-        cudnn.benchmark = True
-
-    if args.resume:
-        model_name = "%s_%s_%s.pth"%(args.basenet, args.img_size, args.ft_iter)
-        print('Resuming training from %s...'%(model_name))
-        weights = torch.load(os.path.join(args.save_folder, model_name))
-        ssd_net.load_state_dict(weights)
+def fit(args, cfg, net, dataset, optimizer, is_train=True):
+    if is_train:
+        net.train()
+        Loss_L, Loss_C = [], []
     else:
-        vgg_weights = torch.load(os.path.join(args.save_folder, args.basenet))
-        print('Loading base network...')
-        ssd_net.vgg.load_state_dict(vgg_weights)
-
-    if args.cuda:
-        net = net.cuda()
-
-    if not args.resume:
-        print('Initializing weights...')
-        # initialize newly added layers' weights with xavier method
-        ssd_net.extras.apply(weights_init)
-        if args.implementation in ["header", "190709"]:
-            ssd_net.header.apply(weights_init)
-        elif args.implementation == "vanilla":
-            ssd_net.loc.apply(weights_init)
-            ssd_net.conf.apply(weights_init)
-
-    if args.optimizer.lower() == "adam":
-        optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-    elif args.optimizer.lower() == "sgd":
-        optimizer = optim.SGD(net.parameters(), lr=args.lr,  momentum=args.momentum,
-                               weight_decay=args.weight_decay)
-    criterion = MultiBoxLoss(cfg['num_classes'], args.overlap_threshold, True, 0,
-                             True, 3, 0.5, False, args.cuda, rematch=args.rematch)
-
-    net.train()
-    # loss counters
-    loc_loss = 0
-    conf_loss = 0
-    epoch = 0
-    print('Loading the dataset...')
-
-    epoch_size = len(dataset) // args.batch_size
-    print('Training SSD on:', dataset.name)
-    print('Using the specified args:')
-    print(args)
-
-    step_index = 0
-
-    if args.visdom:
-        vis_title = 'SSD.PyTorch on ' + dataset.name
-        vis_legend = ['Loc Loss', 'Conf Loss', 'Total Loss']
-        iter_plot = create_vis_plot('Iteration', 'Loss', vis_title, vis_legend)
-        epoch_plot = create_vis_plot('Epoch', 'Loss', vis_title, vis_legend)
-
-    data_loader = data.DataLoader(dataset, args.batch_size,
-                                  num_workers=args.num_workers,
-                                  shuffle=True, collate_fn=detection_collate,
-                                  pin_memory=True)
-    # create batch iterator
-    batch_iterator = iter(data_loader)
-    loc_losses, conf_losses = [], []
-    progress = open(os.path.join(args.save_folder, "%s_train_prog.txt" % args.name), "w")
-    for iteration in range(args.start_iter, args.max_iter):
-        #print("iteration: %s"%iteration)
-        if args.visdom and iteration != 0 and (iteration % epoch_size == 0):
-            update_vis_plot(epoch, loc_loss, conf_loss, epoch_plot, None,
-                            'append', epoch_size)
-            # reset epoch loss counters
-            loc_loss = 0
-            conf_loss = 0
-            epoch += 1
-
-        if iteration in cfg['lr_steps']:
-            step_index += 1
-            adjust_learning_rate(optimizer, args.gamma, step_index)
-
-        # load train data
-        try:
-            images, targets = next(batch_iterator)
-        except StopIteration:
-            batch_iterator = iter(data_loader)
-            images, targets = next(batch_iterator)
-        t0 = time.time()
+        net.eval()
+        all_boxes = [[[] for _ in range(len(dataset))] for _ in range(21)]
+        eval_results = []
+    start_time = time.time()
+    for batch_idx, (images, targets, h, w) in enumerate(dataset):
+        print(batch_idx)
+        if batch_idx >= 5:
+            break
+        # if not net.fix_size:
+        # assert images.size(0) == 1, "batch size for dynamic input shape can only be 1 for 1 GPU RIGHT NOW!"
+        if len(targets) == 0:
+            continue
         images = images.cuda()
         targets = [ann.cuda() for ann in targets]
+        targets_idx_ = torch.cuda.LongTensor([ann.size(0) for ann in targets])
+        targets_idx = torch.cuda.LongTensor([sum(targets_idx_[:_idx]) for _idx in range(len(targets_idx_))])
+        y_idx = torch.stack([targets_idx, targets_idx_], dim=1)
+        y = torch.cat(targets, dim=0).repeat(torch.cuda.device_count(), 1)
+        out1, out2 = net(images, y, y_idx, deform_map=False, test=(not is_train))
+        if args.curr_epoch==0 and batch_idx == 0:
+            # visualize_bbox(args, cfg, images, targets, net.module.prior, batch_idx)
+            pass
+        if is_train:
+            # During train phase, out1 represent loss_l and out2 represent loss_c
+            loss = out1.mean() + out2.mean()
+            Loss_L.append(float(out1.mean().data))
+            Loss_C.append(float(out2.mean().data))
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            #args.curr_epoch += 1
+        else:
+            # Turn the input param detector into None so as to
+            # Experiment with Detector's Hyper-parameters
+            detections, reg_boxes = out1
+            for i in range(detections.size(0)):
+                detection = detections[i].data
+                for j in range(1, detection.size(0)):
+                    dets = detection[j]
+                    mask = dets[:, 0].gt(0.).expand(5, dets.size(0)).t()
+                    dets = torch.masked_select(dets, mask).view(-1, 5)
+                    if dets.size(0) == 0:
+                        continue
+                    boxes = dets[:, 1:]
+                    boxes[:, 0] *= w
+                    boxes[:, 2] *= w
+                    boxes[:, 1] *= h
+                    boxes[:, 3] *= h
+                    scores = dets[:, 0].cpu().numpy()
+                    cls_dets = np.hstack((boxes.cpu().numpy(),
+                                          scores[:, np.newaxis])).astype(np.float32,
+                                                                         copy=False)
+                    all_boxes[j][batch_idx * torch.cuda.device_count() + i] = cls_dets
+            eval_result = evaluate(images, detections.data, targets, batch_idx, 0.1,
+                                   visualize=False, post_combine=True)
+            eval_results.append(eval_result)
+    if is_train:
+        print(" --- loc loss: %.4f, conf loss: %.4f, at epoch %04d, cost %.2f seconds ---" %
+              (avg(Loss_L), avg(Loss_C), args.curr_epoch + 1, time.time() - start_time))
+        args.curr_epoch += 1
+        return avg(Loss_L), avg(Loss_C)
+    else:
+        eval_results = list(map(list, zip(*eval_results)))
+        print(" --- accuracy=%.4f, precision=%.4f, recall=%.4f, f1-score=%.4f, cost %.2f seconds ---" %
+          (avg(eval_results[0]), avg(eval_results[1]), avg(eval_results[2]),
+           avg(eval_results[3]), time.time() - start_time))
+        # represent accuracy, precision, recall, f1_score
+        return avg(eval_results[0]), avg(eval_results[1]), avg(eval_results[2]), avg(eval_results[3])
 
-        #targets_idx = [ann.size(0) for ann in targets]
-        #targets_idx = torch.cuda.LongTensor([sum(targets_idx[:_idx]) for _idx in range(len(targets_idx))]).unsqueeze(-1)
-        #targets = torch.cat(targets, dim=0).cuda()
-        # forward
-        out = net(images)#, targets, targets_idx)
-        # backprop
-        optimizer.zero_grad()
-        loss_l, loss_c = criterion(out, targets)
-        loss = loss_l + loss_c
-        loss.backward()
-        optimizer.step()
-        loc_loss += loss_l.data
-        conf_loss += loss_c.data
-        loc_losses.append(float(loss_l.data))
-        conf_losses.append(float(loss_c.data))
-        result = "--loc_loss: %.4f conf_loss: %.4f--\n"%(float(loss_l.data), float(loss_c.data))
-        progress.write(result)
-        if iteration > 0 and iteration % 10 == 0:
-            t1 = time.time()
-            print('timer: %.4f sec.' % (t1 - t0))
-            print('iter ' + repr(iteration) + ' || Loss: %.4f || Conf_Loss: %.4f || Loc_Loss: %.4f ||' % (loss.data, loss_c.data, loss_l.data), end=' ')
+def val(args, cfg, net, dataset, optimizer, is_train=False):
+    with torch.no_grad():
+        test_net(None, net, None, dataset, None, None)
 
-        if args.visdom:
-            update_vis_plot(iteration, loss_l.data, loss_c.data,
-                            iter_plot, epoch_plot, 'append')
+def evaluate(img, detections, targets, batch_idx, threshold, visualize=False, post_combine=False):
+    eval_result = {}
+    #save_dir = os.path.expanduser("~/Pictures/")
+    w = img.size(3)
+    h = img.size(2)
+    accu, pre, rec, f1 = [], [], [], []
 
-        if iteration > 5000 and iteration % 2000 == 0:
-            print('Saving state, iter:', iteration)
-            torch.save(ssd_net.state_dict(), os.path.join(args.save_folder,
-                                                          '%s_%s_%s.pth'%(args.name, args.img_size, repr(iteration))))
-    progress.close()
+    for i in range(detections.size(0)):
+        gt_cls = targets[i][:, -1].data
+        tar = targets[i][:, :-1].data
+        gt_boxes = [[] for _ in range(20)]
+        for _i, cls in enumerate(gt_cls):
+            gt_boxes[int(cls)].append(tar[_i])
+
+        # enumerate through all classes
+        for j in range(1, detections.size(1)):
+            idx = detections[i, j, :, 0] >= threshold
+            boxes = detections[i, j, idx, 1:]
+
+            if boxes.size(0) == 0 and len(gt_boxes[j]) == 0:
+                continue
+            elif boxes.size(0) != 0 and len(gt_boxes[j]) == 0:
+                accuracy, precision, recall, f1_score = 0, 0, 0, 0
+            elif boxes.size(0) == 0 and len(gt_boxes[j]) != 0:
+                accuracy, precision, recall, f1_score = 0, 0, 0, 0
+            else:
+                jac = jaccard(boxes, gt_boxes[j])
+                overlap, idx = jac.max(1, keepdim=True)
+                # This is not DetEval
+                positive_pred = boxes[overlap.squeeze(1) > 0.5]
+                negative_pred = boxes[overlap.squeeze(1) <= 0.5]
+                if negative_pred.size(0) == 0:
+                    negative_pred = tuple()
+                #print_box(blue_boxes=positive_pred, green_boxes=gt_boxes, red_boxes=negative_pred,
+                          #img=vb.plot_tensor(args, img, margin=0), save_dir=save_dir)
+
+                accuracy, precision, recall = measure(positive_pred, [j], width=w, height=h)
+                if (recall + precision) < 1e-3:
+                    f1_score = 0
+                else:
+                    f1_score = 2 * (recall * precision) / (recall + precision)
+                if visualize and threshold == 0.1 and i == 0:
+                    pred = [[float(coor) for coor in area] for area in positive_pred]
+                    gt = [[float(coor) for coor in area] for area in gt_boxes]
+                    #print_box(negative_pred, green_boxes=gt, blue_boxes=pred, idx=batch_idx,
+                              #img=vb.plot_tensor(args, img, margin=0), save_dir=args.val_log)
+            accu.append(accuracy)
+            pre.append(precision)
+            rec.append(recall)
+            f1.append(f1_score)
+        #eval_result.update({threshold: [avg(accu), avg(pre), avg(rec), avg(f1)]})
+    return avg(accu), avg(pre), avg(rec), avg(f1)
 
 
 def adjust_learning_rate(optimizer, gamma, step):
@@ -183,8 +169,6 @@ def adjust_learning_rate(optimizer, gamma, step):
     lr = args.lr * (gamma ** (step))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
-
-
 
 def weights_init(m):
     if type(m) == torch.nn.Linear:
@@ -209,37 +193,90 @@ def weights_init(m):
         else:
             pass
 
+def main():
+    if args.dataset == 'COCO':
+        if args.dataset_root == VOC_ROOT:
+            if not os.path.exists(COCO_ROOT):
+                parser.error('Must specify dataset_root if specifying dataset')
+            print("WARNING: Using default COCO dataset_root because " +
+                  "--dataset_root was not specified.")
+            args.dataset_root = COCO_ROOT
+        cfg = coco
+        dataset = COCODetection(root=args.dataset_root,
+                                transform=SSDAugmentation(cfg['min_dim'], MEANS))
+    elif args.dataset == 'VOC':
+        #if args.dataset_root == COCO_ROOT:
+            #parser.error('Must specify dataset if specifying dataset_root')
+        cfg = voc
+        train_set = VOCDetection(root=args.dataset_root,
+                               transform=SSDAugmentation(cfg['min_dim'], MEANS))
+        train_set = data.DataLoader(train_set, args.batch_size,
+                                      num_workers=args.num_workers,
+                                      shuffle=True, collate_fn=detection_collate,
+                                      pin_memory=True)
 
-def create_vis_plot(_xlabel, _ylabel, _title, _legend):
-    return viz.line(
-        X=torch.zeros((1,)).cpu(),
-        Y=torch.zeros((1, 3)).cpu(),
-        opts=dict(
-            xlabel=_xlabel,
-            ylabel=_ylabel,
-            title=_title,
-            legend=_legend
-        )
-    )
+        val_set = VOCDetection(args.voc_root, [('2007', "test")],
+                               BaseTransform(args.img_size, (104, 117, 123)),
+                               VOCAnnotationTransform())
+        val_set = data.DataLoader(val_set, torch.cuda.device_count(),
+                                    num_workers=args.num_workers,
+                                    shuffle=False, collate_fn=detection_collate,
+                                    pin_memory=True)
 
+    dt = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M")
+    ssd_net = build_ssd(args, 'train', cfg['min_dim'], cfg['num_classes'])
 
-def update_vis_plot(iteration, loc, conf, window1, window2, update_type,
-                    epoch_size=1):
-    viz.line(
-        X=torch.ones((1, 3)).cpu() * iteration,
-        Y=torch.Tensor([loc, conf, loc + conf]).unsqueeze(0).cpu() / epoch_size,
-        win=window1,
-        update=update_type
-    )
-    # initialize epoch plot on first iteration
-    if iteration == 0:
-        viz.line(
-            X=torch.zeros((1, 3)).cpu(),
-            Y=torch.Tensor([loc, conf, loc + conf]).unsqueeze(0).cpu(),
-            win=window2,
-            update=True
-        )
+    args.curr_epoch = args.start_iter
+    if args.resume:
+        model_name = "%s_%s_%s.pth" % (args.basenet, args.img_size, args.ft_iter)
+        print('Resuming training from %s...' % (model_name))
+        weights = torch.load(os.path.join(args.save_folder, model_name))
+        ssd_net.load_state_dict(weights)
+    else:
+        vgg_weights = torch.load(os.path.join(args.save_folder, args.basenet))
+        print('Loading base network...')
+        ssd_net.vgg.load_state_dict(vgg_weights)
+        print('Initializing weights...')
+        ssd_net.extras.apply(weights_init)
+        if args.implementation in ["header", "190709"]:
+            ssd_net.header.apply(weights_init)
+        elif args.implementation == "vanilla":
+            ssd_net.loc.apply(weights_init)
+            ssd_net.conf.apply(weights_init)
 
+    if args.cuda:
+        net = torch.nn.DataParallel(ssd_net).cuda()
+        cudnn.benchmark = True
+
+    if args.optimizer.lower() == "adam":
+        optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    elif args.optimizer.lower() == "sgd":
+        optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum,
+                              weight_decay=args.weight_decay)
+    #criterion = MultiBoxLoss(cfg['num_classes'], args.overlap_threshold, True, 0,
+                             #True, 3, 0.5, False, args.cuda, rematch=args.rematch)
+
+    loc_loss, conf_loss = [], []
+    accuracy, precision, recall, f1_score = [], [], [], []
+    for epoch in range(args.max_iter):
+        loc_avg, conf_avg = fit(args, cfg, net, train_set, optimizer, is_train=True)
+        loc_loss.append(loc_avg)
+        conf_loss.append(conf_avg)
+        train_losses = [np.asarray(loc_loss), np.asarray(conf_loss)]
+        if val_set is not None and epoch != 0 and epoch % 5 == 0:
+            val(args, cfg, net, val_set, optimizer)
+        if epoch != 0 and epoch % 10 == 0:
+            torch.save(net.state_dict(),
+                       os.path.join(args.save_folder, '%s_%s_%s.pth' %
+                                    (args.name, args.img_size, epoch)))
+        if epoch > 5:
+            vb.plot_multi_loss_distribution(
+                multi_line_data=[train_losses],
+                multi_line_labels=[["location", "confidence"]],
+                save_path=args.val_log, window=5, name=dt,
+                bound=[{"low": 0.0, "high": 3.0}],
+                titles=["Train Loss"]
+            )
 
 if __name__ == '__main__':
-    train()
+    main()

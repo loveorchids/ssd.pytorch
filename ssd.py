@@ -54,14 +54,13 @@ class SSD(nn.Module):
         elif args.implementation == "vanilla":
             self.loc = nn.ModuleList(head[0])
             self.conf = nn.ModuleList(head[1])
-        #self.criterion = MultiBoxLoss(self.cfg['num_classes'], args.overlap_threshold, True, 0,
-                                 #True, 3, 0.5, False, args.cuda, rematch=args.rematch)
-        if phase == 'test':
-            self.softmax = nn.Softmax(dim=-1)
-            self.detect = Detect(num_classes, bkg_label=0, top_k=args.top_k,
-                                 conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
+        self.criterion = MultiBoxLoss(self.cfg['num_classes'], args.overlap_threshold, True, 0,
+                                 True, 3, 0.5, False, args.cuda, rematch=args.rematch)
+        self.softmax = nn.Softmax(dim=-1)
+        self.detect = Detect(num_classes, bkg_label=0, top_k=args.top_k,
+                             conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
 
-    def forward(self, x, y=None, y_idx=None, deform_map=False):
+    def forward(self, x, y=None, y_idx=None, deform_map=False, test=False):
         """Applies network layers and ops on input image(s) x.
 
         Args:
@@ -130,30 +129,21 @@ class SSD(nn.Module):
 
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
-        if self.phase == "test":
-            output = (
-                loc.view(loc.size(0), -1, 4),                   # loc preds
-                self.softmax(conf.view(conf.size(0), -1,
-                             self.num_classes)),                # conf preds
-                self.priors[x.device.index].type(type(x.data))                  # default boxes
-            )
-            if deform_map:
-                return output, deform
-            else:
-                return output
+        if test:
+            output = self.detect(loc.view(loc.size(0), -1, 4),
+                                 self.softmax(conf.view(conf.size(0), -1, self.num_classes)),
+                                 self.priors[x.device.index].type(type(x.data)))
+            return output, deform
         else:
             output = (
                 loc.view(loc.size(0), -1, 4),
                 conf.view(conf.size(0), -1, self.num_classes),
                 self.priors
             )
-        if deform_map:
-            return output, deform
-        else:
-            return output
-            #loss_l, loss_c = self.criterion(output, y)
+            loss_l, loss_c = self.criterion(output, y, y_idx)
             #print(loss_l, loss_c)
-            #return loss_l.unsqueeze(0), loss_c.unsqueeze(0)
+            return loss_l.unsqueeze(0), loss_c.unsqueeze(0)
+
 
     def load_weights(self, base_file):
         other, ext = os.path.splitext(base_file)
@@ -190,7 +180,7 @@ def vgg(cfg, i, batch_norm=False):
                nn.ReLU(inplace=True), conv7, nn.ReLU(inplace=True)]
     return layers
 
-
+#cfg = [256, 'S', 512, 128, 'S', 256, 128, 256, 128, 256], i=1024
 def add_extras(cfg, i, batch_norm=False):
     # Extra layers added to VGG for feature scaling
     layers = []

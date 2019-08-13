@@ -346,21 +346,17 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         x = Variable(im.unsqueeze(0))
         if args.cuda:
             x = x.cuda()
-        _t['im_detect'].tic()
-        if args.visualize_deformation:
-            detections, deform_pyramid = net(x, deform_map=True)
-            # reg_boxes and pred_box are in point form
-            detections, reg_boxes = detector(detections[0], detections[1], detections[2])
-            detections = detections.data
+        #_t['im_detect'].tic()
+        out, deform_pyramid = net(x, deform_map=args.visualize_deformation, test=True)
+        # reg_boxes and pred_box are in point form
+        detections, reg_boxes = out
+        detections = detections.data
+        if len(deform_pyramid) > 0:
             cls = detections[0, 1:, :, 0]
             reg = detections[0, 1:, :, 1:]
             pred_box = reg[cls >= 0.1, :] * args.img_size
             visualize_deformation(voc, x, deform_pyramid, reg_boxes, net.priors[x.device.index],
                                   pred_box, gt * args.img_size, i)
-        else:
-            detections = net(x)
-            detections, _ = detector(detections[0], detections[1], detections[2])
-            detections = detections.data
 
         #detect_time = _t['im_detect'].toc(average=False)
         # skip j = 0, because it's the background class

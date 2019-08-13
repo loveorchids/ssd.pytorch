@@ -46,7 +46,7 @@ class MultiBoxLoss(nn.Module):
         self.variance = cfg['variance']
         self.rematch = rematch
 
-    def forward(self, predictions, targets):
+    def forward(self, predictions, targets, targets_idx):
         """Multibox Loss
         Args:
             predictions (tuple): A tuple containing loc preds, conf preds,
@@ -64,13 +64,16 @@ class MultiBoxLoss(nn.Module):
         num_priors = (priors.size(0))
         num_classes = self.num_classes
 
+        targets_idx = targets_idx.tolist()
         # match priors (default boxes) and ground truth boxes
         loc_t = torch.cuda.FloatTensor(batch_num, num_priors, 4)
         conf_t = torch.cuda.LongTensor(batch_num, num_priors)
 
         for idx in range(batch_num):
-            truths = targets[idx][:, :-1].data
-            labels = targets[idx][:, -1].data
+            truths = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], :-1].data
+            labels = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], -1].data
+            #truths = targets[idx][:, :-1].data
+            #labels = targets[idx][:, -1].data
             if self.rematch:
                 defaults = center_size(decode(loc_data[idx], priors.data, self.variance).clamp(min=0, max=1))
             else:
