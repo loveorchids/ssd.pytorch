@@ -355,15 +355,16 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         if len(deform_pyramid) > 0:
             cls = detections[0, 1:, :, 0]
             reg = detections[0, 1:, :, 1:]
-            pred_box = reg[cls >= 0.1, :] * args.img_size
-            visualize_deformation(voc, x, deform_pyramid, reg_boxes, net.priors[x.device.index],
-                                  pred_box, gt * args.img_size, i)
+            pred_box = reg[cls >= args.pred_conf, :] * args.img_size
+            visualize_detection(x, pred_box, gt * args.img_size, i)
+            #visualize_deformation(voc, x, deform_pyramid, reg_boxes, net.priors[x.device.index],
+                                  #pred_box, gt * args.img_size, i)
 
         #detect_time = _t['im_detect'].toc(average=False)
         # skip j = 0, because it's the background class
         for j in range(1, detections.size(1)):
             dets = detections[0, j, :]
-            mask = dets[:, 0].gt(0.).expand(5, dets.size(0)).t()
+            mask = dets[:, 0].gt(args.pred_conf).expand(5, dets.size(0)).t()
             dets = torch.masked_select(dets, mask).view(-1, 5)
             if dets.size(0) == 0:
                 continue
@@ -374,8 +375,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             boxes[:, 3] *= h
             scores = dets[:, 0].cpu().numpy()
             cls_dets = np.hstack((boxes.cpu().numpy(),
-                                  scores[:, np.newaxis])).astype(np.float32,
-                                                                 copy=False)
+                                  scores[:, np.newaxis])).astype(np.float32, copy=False)
             all_boxes[j][i] = cls_dets
         #result = 'im_detect: {:d}/{:d} {:.3f}s'.format(i + 1, num_images, detect_time)
         #progress.write(result)
@@ -392,6 +392,25 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
 def evaluate_detections(box_list, output_dir, dataset):
     write_voc_results_file(box_list, dataset)
     do_python_eval(output_dir)
+
+
+def visualize_detection(img, pred_boxes, ground_truth, img_idx):
+    path = os.path.expanduser("~/Pictures/deform_vis_%s" % args.name)
+    if not os.path.exists(path):
+        os.mkdir(path)
+    img = img[0].permute(1, 2, 0).data.cpu().numpy()
+    # Convert to numpy and RGB form
+    img = ((img - np.min(img)) / (np.max(img) - np.min(img)) * 255).astype("uint8")[:, :, (2, 1, 0)].copy()
+    for pred in pred_boxes:
+        x1, y1, x2, y2 = norm(pred[0]), norm(pred[1]), norm(pred[2]), norm(pred[3])
+        cv2.rectangle(img, (x1, y1), (x2, y2), (94, 218, 250), 1)
+    # Draw Ground Truth on image
+    for gt in ground_truth:
+        x1, y1, x2, y2 = norm(gt[0]), norm(gt[1]), norm(gt[2]), norm(gt[3])
+        cv2.rectangle(img, (x1, y1), (x2, y2), (33, 235, 63), 1)
+    name = "iter_%s_%s.jpg" % (str(args.iter).zfill(5), str(img_idx).zfill(3))
+    cv2.imwrite(os.path.join(path, name), img)
+
 
 
 def visualize_deformation(cfg, img_tensor, deform_pyramid, reg_boxes, default_boxes,
@@ -457,8 +476,7 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, reg_boxes, default_bo
             d_x = torch.mean(deform[:, 0::2, :, :], dim=1).unsqueeze(1)
             d_y = torch.mean(deform[:, 1::2, :, :], dim=1).unsqueeze(1)
             deform = torch.cat([d_x, d_y], dim=1)
-            if i == 4 and _d == 0:
-                z=0
+
             per_batch = []
             for j in range(deform.size(0)):
                 box = boxes[j]
