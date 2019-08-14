@@ -60,6 +60,8 @@ def prepare_args(root_dir):
                         help='overlap threshold to match prior to ground truth')
     parser.add_argument("--rematch", action="store_true",
                         help="if true, we will use the regressed box produced by localizer to calculate the loss.")
+    parser.add_argument('--rematch_overlap_threshold', type=float, default=0.75,
+                        help='overlap threshold to match prior to ground truth after regression')
 
 
     # Training Parameter
@@ -106,6 +108,8 @@ def prepare_args(root_dir):
     # Others
     parser.add_argument('--visdom', default=False, type=str2bool,
                         help='Use visdom for loss visualization')
+    parser.add_argument('--visualize_box', action="store_true",
+                        help="visualize the matched boxes before and after regression for each training iteration")
     args = parser.parse_args()
     if not os.path.exists(args.save_folder):
         os.mkdir(args.save_folder)

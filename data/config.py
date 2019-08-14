@@ -25,6 +25,7 @@ voc = {
     'variance': [0.1, 0.2],
     'clip': True,
     'name': 'VOC',
+    'stride': [1, 1, 1, 1, 1, 1],
 }
 
 coco = {
@@ -40,4 +41,5 @@ coco = {
     'variance': [0.1, 0.2],
     'clip': True,
     'name': 'COCO',
+    'stride': [1, 1, 1, 1, 1, 1],
 }

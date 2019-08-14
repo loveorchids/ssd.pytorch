@@ -5,6 +5,7 @@ from torch.autograd import Variable
 from data import coco as cfg
 from ..box_utils import match, log_sum_exp
 from layers.box_utils import *
+from ..visualization import *
 
 
 class MultiBoxLoss(nn.Module):
@@ -30,13 +31,14 @@ class MultiBoxLoss(nn.Module):
         See: https://arxiv.org/pdf/1512.02325.pdf for more details.
     """
 
-    def __init__(self, num_classes, overlap_thresh, prior_for_matching,
+    def __init__(self, num_classes, args, prior_for_matching,
                  bkg_label, neg_mining, neg_pos, neg_overlap, encode_target,
                  use_gpu=True, rematch=False):
         super(MultiBoxLoss, self).__init__()
         self.use_gpu = use_gpu
         self.num_classes = num_classes
-        self.threshold = overlap_thresh
+        self.args = args
+        self.threshold = args.overlap_threshold
         self.background_label = bkg_label
         self.encode_target = encode_target
         self.use_prior_for_matching = prior_for_matching
@@ -46,7 +48,7 @@ class MultiBoxLoss(nn.Module):
         self.variance = cfg['variance']
         self.rematch = rematch
 
-    def forward(self, predictions, targets, targets_idx):
+    def forward(self, predictions, targets, targets_idx, images=None):
         """Multibox Loss
         Args:
             predictions (tuple): A tuple containing loc preds, conf preds,
@@ -76,10 +78,18 @@ class MultiBoxLoss(nn.Module):
             #labels = targets[idx][:, -1].data
             if self.rematch:
                 defaults = center_size(decode(loc_data[idx], priors.data, self.variance).clamp(min=0, max=1))
+                if images is not None:
+                    start_idx = priors.device.index * batch_num + idx
+                    _target = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], :].data
+                    visualize_bbox(self.args, cfg, images[idx:idx+1], [_target], defaults, 0, prefix="reg", start_idx=start_idx)
+                    pass
+                threshold = self.args.rematch_overlap_threshold
             else:
                 defaults = priors.data
-            match(self.threshold, truths, defaults, self.variance, labels,
+                threshold = self.threshold
+            match(threshold, truths, defaults, self.variance, labels,
                   loc_t, conf_t, idx)
+
         # wrap targets
         #loc_t = Variable(loc_t, requires_grad=False)
         #conf_t = Variable(conf_t, requires_grad=False)

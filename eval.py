@@ -342,7 +342,8 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             print("progress: %s/%s cost %.4f seconds."%(i, num_images, time.time() - start))
             start = time.time()
         im, gt, h, w = dataset.pull_item(i)
-
+        #cv2.imwrite("/home/wang/Pictures/tmp.jpg",
+                    #cv2.cvtColor(im.permute(1, 2, 0).numpy(), cv2.COLOR_BGR2RGB) + 128)
         x = Variable(im.unsqueeze(0))
         if args.cuda:
             x = x.cuda()

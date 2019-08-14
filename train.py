@@ -18,7 +18,7 @@ import torch.utils.data as data
 import numpy as np
 from args import prepare_args
 import mmdet.ops.dcn as dcn
-from eval import test_net
+from layers.visualization import *
 
 args = prepare_args(VOC_ROOT)
 TMPJPG = os.path.expanduser("~/Pictures/tmp.jpg")
@@ -45,12 +45,12 @@ def fit(args, cfg, net, dataset, optimizer, is_train=True):
         targets = [ann.cuda() for ann in targets]
         targets_idx_ = torch.cuda.LongTensor([ann.size(0) for ann in targets])
         targets_idx = torch.cuda.LongTensor([sum(targets_idx_[:_idx]) for _idx in range(len(targets_idx_))])
+        if batch_idx == 0 and args.visualize_box:
+            visualize_bbox(args, cfg, images, targets, net.module.priors[0], batch_idx)
+            pass
         y_idx = torch.stack([targets_idx, targets_idx_], dim=1)
         y = torch.cat(targets, dim=0).repeat(torch.cuda.device_count(), 1)
         out1, out2 = net(images, y, y_idx, deform_map=False, test=(not is_train))
-        if args.curr_epoch==0 and batch_idx == 0:
-            # visualize_bbox(args, cfg, images, targets, net.module.prior, batch_idx)
-            pass
         if is_train:
             # During train phase, out1 represent loss_l and out2 represent loss_c
             loss = out1.mean() + out2.mean()
@@ -189,7 +189,7 @@ def main():
                                transform=SSDAugmentation(cfg['min_dim'], MEANS))
         train_set = data.DataLoader(train_set, args.batch_size,
                                       num_workers=args.num_workers,
-                                      shuffle=True, collate_fn=detection_collate,
+                                      shuffle=False, collate_fn=detection_collate,
                                       pin_memory=True)
 
         val_set = VOCDetection(args.voc_root, [('2007', "test")],

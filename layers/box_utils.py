@@ -68,7 +68,7 @@ def jaccard(box_a, box_b):
     return inter / union  # [A,B]
 
 
-def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx):
+def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx, visualize=False):
     """Match each prior box with the ground truth box of the highest jaccard
     overlap, encode the bounding boxes, then return the matched indices
     corresponding to both confidence and location preds.
@@ -110,6 +110,8 @@ def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx):
     matches = truths[best_truth_idx]          # Shape: [num_priors,4]
     conf = labels[best_truth_idx] + 1         # Shape: [num_priors]
     conf[best_truth_overlap < threshold] = 0  # label as background
+    if visualize:
+        return overlaps, conf
     loc = encode(matches, priors, variances)
     loc_t[idx] = loc    # [num_priors,4] encoded offsets to learn
     conf_t[idx] = conf  # [num_priors] top class label for each prior
@@ -300,3 +302,26 @@ def get_box_size(box):
     calculate the bound box size
     """
     return (box[:, 2]-box[:, 0]) * (box[:, 3]-box[:, 1])
+
+def coord_to_rect(coord, height, width):
+    """
+    Convert 4 point boundbox coordinate to matplotlib rectangle coordinate
+    """
+    x1, y1, x2, y2 = coord[0], coord[1], coord[2] - coord[0], coord[3] - coord[1]
+    return int(x1 * width), int(y1 * height), int(x2 * width), int(y2 * height)
+
+
+def get_parameter(param):
+    """
+    Convert input parameter to two parameter if they are lists or tuples
+    Mainly used in tb_vis.py and tb_model.py
+    """
+    if type(param) is list or type(param) is tuple:
+        assert len(param) == 2, "input parameter shoud be either scalar or 2d list or tuple"
+        p1, p2 = param[0], param[1]
+    else:
+        p1, p2 = param, param
+    return p1, p2
+
+def calculate_anchor_number(cfg, i):
+    return 2 + 2* len(cfg['aspect_ratios'][i])
