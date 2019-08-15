@@ -244,7 +244,7 @@ def main():
             #fit(args, cfg, net, val_set, optimizer, is_train=False)
             val(args, cfg, net, val_set, optimizer)
         if epoch != 0 and epoch % 5 == 0:
-            torch.save(net.state_dict(),
+            torch.save(net.module.state_dict(),
                        os.path.join(args.save_folder, '%s_%s_%s.pth' %
                                     (args.name, args.img_size, epoch)))
         if epoch > 5:
