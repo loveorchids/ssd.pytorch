@@ -60,7 +60,7 @@ def prepare_args(root_dir):
                         help='overlap threshold to match prior to ground truth')
     parser.add_argument("--rematch", action="store_true",
                         help="if true, we will use the regressed box produced by localizer to calculate the loss.")
-    parser.add_argument('--rematch_overlap_threshold', type=float, default=0.75,
+    parser.add_argument('--rematch_overlap_threshold', type=float, default=0.7,
                         help='overlap threshold to match prior to ground truth after regression')
 
 
@@ -95,21 +95,25 @@ def prepare_args(root_dir):
 
 
     # Evaluation Parameter
-    parser.add_argument('-vd', '--visualize_deformation', action="store_true",
-                        help="visualize deformation or not")
-    parser.add_argument('--visualize_gif', action="store_true",
-                        help="visualize detection process as gif or not")
     parser.add_argument('--cuda_id', default=2, type=int,
                         help='device id of test')
     parser.add_argument('--val_log', default="./val", type=str,
                         help='validation folder location')
+    parser.add_argument('--pred_conf', default=0.1, type=float,
+                        help='confidence to filter pred box')
 
 
-    # Others
+    # Visualization
     parser.add_argument('--visdom', default=False, type=str2bool,
                         help='Use visdom for loss visualization')
     parser.add_argument('--visualize_box', action="store_true",
                         help="visualize the matched boxes before and after regression for each training iteration")
+    parser.add_argument('-vd', '--visualize_deformation', action="store_true",
+                        help="visualize deformation or not")
+    parser.add_argument('--visualize_gif', action="store_true",
+                        help="visualize detection process as gif or not")
+    parser.add_argument('--visualize_regbox', action="store_true",
+                        help="visualize regressed prior boxes during evaluation")
     args = parser.parse_args()
     if not os.path.exists(args.save_folder):
         os.mkdir(args.save_folder)

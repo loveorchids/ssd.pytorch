@@ -25,6 +25,7 @@ import pickle
 import cv2
 from args import prepare_args
 from layers.box_utils import *
+from layers.visualization import *
 
 if sys.version_info[0] == 2:
     import xml.etree.cElementTree as ET
@@ -348,17 +349,26 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         if args.cuda:
             x = x.cuda()
         #_t['im_detect'].tic()
-        out, deform_pyramid = net(x, y=None, y_idx=None, deform_map=args.visualize_deformation, test=True)
+        out, deform_pyramid = net(x, y=torch.cuda.FloatTensor(gt), y_idx=None,
+                                  deform_map=args.visualize_deformation, test=True)
         # reg_boxes and pred_box are in point form
         detections, reg_boxes = out
         detections = detections.data
-        if len(deform_pyramid) > 0:
+
+        if args.visualize_regbox:
+            visualize_bbox(args, voc, x, [torch.cuda.FloatTensor(gt)], center_size(reg_boxes.squeeze(0)), i, prefix="v4_16k")
+            continue
+        if args.visualize_box:
             cls = detections[0, 1:, :, 0]
             reg = detections[0, 1:, :, 1:]
             pred_box = reg[cls >= args.pred_conf, :] * args.img_size
             visualize_detection(x, pred_box, gt * args.img_size, i)
-            #visualize_deformation(voc, x, deform_pyramid, reg_boxes, net.priors[x.device.index],
-                                  #pred_box, gt * args.img_size, i)
+        if len(deform_pyramid) > 0:
+            cls = detections[0, 1:, :, 0]
+            reg = detections[0, 1:, :, 1:]
+            pred_box = reg[cls >= args.pred_conf, :] * args.img_size
+            visualize_deformation(voc, x, deform_pyramid, reg_boxes, net.priors[x.device.index],
+                                  pred_box, gt * args.img_size, i)
 
         #detect_time = _t['im_detect'].toc(average=False)
         # skip j = 0, because it's the background class
@@ -401,16 +411,15 @@ def visualize_detection(img, pred_boxes, ground_truth, img_idx):
     img = img[0].permute(1, 2, 0).data.cpu().numpy()
     # Convert to numpy and RGB form
     img = ((img - np.min(img)) / (np.max(img) - np.min(img)) * 255).astype("uint8")[:, :, (2, 1, 0)].copy()
+    for gt in ground_truth:
+        x1, y1, x2, y2 = norm(gt[0]), norm(gt[1]), norm(gt[2]), norm(gt[3])
+        cv2.rectangle(img, (x1, y1), (x2, y2), (33, 235, 63), 1)
     for pred in pred_boxes:
         x1, y1, x2, y2 = norm(pred[0]), norm(pred[1]), norm(pred[2]), norm(pred[3])
         cv2.rectangle(img, (x1, y1), (x2, y2), (94, 218, 250), 1)
     # Draw Ground Truth on image
-    for gt in ground_truth:
-        x1, y1, x2, y2 = norm(gt[0]), norm(gt[1]), norm(gt[2]), norm(gt[3])
-        cv2.rectangle(img, (x1, y1), (x2, y2), (33, 235, 63), 1)
     name = "iter_%s_%s.jpg" % (str(args.iter).zfill(5), str(img_idx).zfill(3))
     cv2.imwrite(os.path.join(path, name), img)
-
 
 
 def visualize_deformation(cfg, img_tensor, deform_pyramid, reg_boxes, default_boxes,
@@ -565,6 +574,14 @@ if __name__ == '__main__':
         model_name = "%s_%s_%s.pth"%(args.name, args.img_size, args.iter)
         print("Evaluation on model: %s"%model_name)
         pretrained_weight = torch.load(os.path.join(args.save_folder, model_name))
+
+        from collections import OrderedDict
+
+        new_state_dict = OrderedDict()
+        for k, v in pretrained_weight.items():
+            name = k[7:]  # remove `module.`
+            new_state_dict[name] = v
+
         net.load_state_dict(pretrained_weight)
         net.eval()
         print('Finished loading model!')

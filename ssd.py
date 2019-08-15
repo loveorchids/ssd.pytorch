@@ -118,11 +118,11 @@ class SSD(nn.Module):
                     centeroid = self.prior_centeroids
                 if deform_map:
                   l, c, d = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                              centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
+                              centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg, y=y)
                   deform.append(d)
                 else:
                   l, c = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                           centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
+                           centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg, y=y)
                 start_id = end_id
                 loc.append(l.permute(0, 2, 3, 1).contiguous())
                 conf.append(c.permute(0, 2, 3, 1).contiguous())
@@ -277,7 +277,7 @@ class DetectionHeader(nn.Module):
                 _deform = nn.Conv2d(in_channel, num_classes, kernel_size=3, padding=1)
             self.conf_layers.append(_deform)
 
-    def forward(self, x, h, verbose=False, deform_map=False, priors=None, centeroids=None, cfg=None):
+    def forward(self, x, h, verbose=False, deform_map=False, priors=None, centeroids=None, cfg=None, y=None):
         # regression is a list, the length of regression equals to the number different aspect ratio
         # under current receptive field, elements of regression are PyTorch Tensor, encoded in
         # point-form, represent the regressed prior boxes.
@@ -298,6 +298,16 @@ class DetectionHeader(nn.Module):
                     prior_center = centeroids[idx, :].repeat(x.size(0), 1)
                     _reg = decode(reg.permute(0, 2, 3, 1).contiguous().view(-1, 4),
                                   prior.repeat(x.size(0), 1), cfg["variance"]).clamp(min=0, max=1)
+                    if y is not None:
+                        overlaps = jaccard(y[:, :-1], _reg)
+                        tmp = (overlaps > 0.6).nonzero().tolist()
+                        for t in tmp:
+                            _reg[t[1]] = y[t[0], :-1]
+                            reg_i = t[1] // x.size(2)
+                            reg_j = t[1] - (reg_i * x.size(2))
+                            regression[i][:, :, reg_i, reg_j] = encode(y[t[0]:t[0]+1, :-1], prior[t[1]:t[1]+1], cfg["variance"])
+                            #decode(regression[i][:, :, 11, 4], prior[t[1]].unsqueeze(0), cfg["variance"])
+
                     reg_center = center_conv_point(_reg)
                     #if 1 < x.size(2) <= 10:
                         #visualize_box_and_center(_reg.view(x.size(0), reg.size(2) * reg.size(3), -1)[0], centeroids[idx, :],
