@@ -95,6 +95,10 @@ def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx, visu
     best_prior_overlap, best_prior_idx = overlaps.max(1, keepdim=True)
     # [1,num_priors] best ground truth for each prior
     best_truth_overlap, best_truth_idx = overlaps.max(0, keepdim=True)
+
+    #tmp = best_truth_overlap.repeat(truths.size(0), 1) - overlaps
+    #(torch.sum(tmp > 0.2, dim=0) == 3) * (best_truth_overlap.squeeze_() > threshold)
+
     best_truth_idx.squeeze_(0)
     best_truth_overlap.squeeze_(0)
     best_prior_idx.squeeze_(1)
