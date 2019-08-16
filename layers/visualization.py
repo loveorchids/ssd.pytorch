@@ -185,7 +185,9 @@ def visualize_bbox(args, cfg, images, targets, prior=None, idx=0, prefix="", sta
         plt.grid(False)
         plt.tight_layout()
         if not prefix:
-            prefix = "sample"
-        plt.savefig(os.path.join(args.val_log, "batch_%s_%s_vis_%s.jpg" % (idx, prefix, start_idx + i)))
+            _prefix = "sample"
+        else:
+            _prefix = prefix
+        plt.savefig(os.path.join(args.val_log, "batch_%s_%s_vis_%s.jpg" % (idx, _prefix, start_idx + i)))
         plt.close()
 

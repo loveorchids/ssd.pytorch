@@ -87,8 +87,7 @@ class MultiBoxLoss(nn.Module):
             else:
                 defaults = priors.data
                 threshold = self.threshold
-            match(threshold, truths, defaults, self.variance, labels,
-                  loc_t, conf_t, idx)
+            match(threshold, truths, defaults, self.variance, labels, loc_t, conf_t, idx)
 
         # wrap targets
         #loc_t = Variable(loc_t, requires_grad=False)

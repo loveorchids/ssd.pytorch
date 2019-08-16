@@ -118,11 +118,11 @@ class SSD(nn.Module):
                     centeroid = self.prior_centeroids
                 if deform_map:
                   l, c, d = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                              centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg, y=y)
+                              centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
                   deform.append(d)
                 else:
                   l, c = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                           centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg, y=y)
+                           centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
                 start_id = end_id
                 loc.append(l.permute(0, 2, 3, 1).contiguous())
                 conf.append(c.permute(0, 2, 3, 1).contiguous())
