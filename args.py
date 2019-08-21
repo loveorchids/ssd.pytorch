@@ -51,6 +51,14 @@ def prepare_args(root_dir):
                         help='allow bias or not')
     parser.add_argument('--deform_offset_dilation', default=1, type=int,
                         help='allow bias or not')
+
+    parser.add_argument('--cls_deform_layer', default="normal", type=str,
+                        help='deformation layer for classification')
+    parser.add_argument('--cls_deform_increment', nargs='+', default=[2],
+                        help='increment in cls deformation')
+    parser.add_argument("--cascade", type=int, help="detector top_k", default=1)
+    parser.add_argument('--loc_deform_layer', default="normal", type=str,
+                        help='deformation layer for localization')
     parser.add_argument("--top_k", type=int, help="detector top_k", default=200)
     parser.add_argument("--conf_threshold", type=float, default=0.01,
                         help="detector_conf_threshold")
@@ -114,6 +122,8 @@ def prepare_args(root_dir):
                         help="visualize detection process as gif or not")
     parser.add_argument('--visualize_regbox', action="store_true",
                         help="visualize regressed prior boxes during evaluation")
+    parser.add_argument('--gt_replace', action="store_true",
+                        help="replace the prior box with ground truth box when IoU is bigger than 0.6")
     args = parser.parse_args()
     if not os.path.exists(args.save_folder):
         os.mkdir(args.save_folder)

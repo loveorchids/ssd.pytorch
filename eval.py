@@ -363,6 +363,7 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             reg = detections[0, 1:, :, 1:]
             pred_box = reg[cls >= args.pred_conf, :] * args.img_size
             visualize_detection(x, pred_box, gt * args.img_size, i)
+            continue
         if len(deform_pyramid) > 0:
             cls = detections[0, 1:, :, 0]
             reg = detections[0, 1:, :, 1:]
