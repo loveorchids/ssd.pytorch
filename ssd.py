@@ -107,22 +107,25 @@ class SSD(nn.Module):
             if k % 2 == 1:
                 sources.append(x)
 
+        #for i in range(self.args.cascade):
         # apply multibox head to source layers
         if self.args.implementation in ["header", "190709"]:
             start_id = 0
             for idx, (x, h) in enumerate(zip(sources, self.header)):
                 end_id = start_id + x.size(2) * x.size(3) * (2 + 2 * len(self.cfg["aspect_ratios"][idx]))
-                if self.args.deformation_source.lower() == "geometric_v2":
-                    centeroid = self.rf_prior_centeroids
-                else:
-                    centeroid = self.prior_centeroids
                 if deform_map:
-                  l, c, d = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                              centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg, y=y)
+                  l, c, d = h(x, input_h, deform_map=deform_map,
+                              priors=self.priors[x.device.index][start_id: end_id],
+                              rf_centroid=self.rf_prior_centeroids[x.device.index][start_id: end_id],
+                              centroid=self.prior_centeroids[x.device.index][start_id: end_id],
+                              cfg=self.cfg, y=y)
                   deform.append(d)
                 else:
-                  l, c = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                           centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg, y=y)
+                  l, c = h(x, input_h, deform_map=deform_map,
+                           priors=self.priors[x.device.index][start_id: end_id],
+                           rf_centroid=self.rf_prior_centeroids[x.device.index][start_id: end_id],
+                           prior_centroid=self.prior_centeroids[x.device.index][start_id: end_id],
+                           cfg=self.cfg, y=y)
                 start_id = end_id
                 loc.append(l.permute(0, 2, 3, 1).contiguous())
                 conf.append(c.permute(0, 2, 3, 1).contiguous())
@@ -130,6 +133,8 @@ class SSD(nn.Module):
             for (x, l, c) in zip(sources, self.loc, self.conf):
                 loc.append(l(x).permute(0, 2, 3, 1).contiguous())
                 conf.append(c(x).permute(0, 2, 3, 1).contiguous())
+        else:
+            raise NotImplementedError()
 
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
@@ -220,11 +225,15 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
         return vgg, extra_layers, header
     elif opt.implementation == "vanilla":
         for k, v in enumerate(vgg_source):
-            loc_layers += [nn.Conv2d(vgg[v].out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
-            conf_layers += [nn.Conv2d(vgg[v].out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
+            loc_layers += [nn.Conv2d(vgg[v].out_channels, cfg[k] * 4,
+                                     kernel_size=3, padding=1)]
+            conf_layers += [nn.Conv2d(vgg[v].out_channels, cfg[k] * num_classes,
+                                      kernel_size=3, padding=1)]
         for k, v in enumerate(extra_layers[1::2], 2):
-            loc_layers += [nn.Conv2d(v.out_channels, cfg[k] * 4, kernel_size=3, padding=1)]
-            conf_layers += [nn.Conv2d(v.out_channels, cfg[k] * num_classes, kernel_size=3, padding=1)]
+            loc_layers += [nn.Conv2d(v.out_channels, cfg[k] * 4,
+                                     kernel_size=3, padding=1)]
+            conf_layers += [nn.Conv2d(v.out_channels, cfg[k] * num_classes,
+                                      kernel_size=3, padding=1)]
         return vgg, extra_layers, (loc_layers, conf_layers)
     else:
         raise NotImplementedError()
@@ -242,7 +251,8 @@ class DetectionHeader(nn.Module):
         for i in range(ratios):
             self.loc_layers.append(nn.Conv2d(in_channel, 4, kernel_size=3, padding=1))
 
-        if opt.deformation and opt.deformation_source.lower() not in ["geometric", "geometric_v2"]:
+        if opt.deformation and \
+            opt.deformation_source.lower() not in ["geometric", "geometric_v2"]:
             self.offset_groups = nn.ModuleList([])
             if opt.deformation_source.lower() == "input":
                 # Previous version, represent deformation_source is True
@@ -260,7 +270,8 @@ class DetectionHeader(nn.Module):
                 deform_depth = 2 * (self.kernel_size ** 2)
             for i in range(ratios):
                 pad = int(0.5 * (self.kernel_size - 1) + opt.deform_offset_dilation - 1)
-                _offset2d = nn.Conv2d(offset_in_channel, deform_depth, kernel_size=self.kernel_size,
+                _offset2d = nn.Conv2d(offset_in_channel, deform_depth,
+                                      kernel_size=self.kernel_size,
                                       bias=opt.deform_offset_bias, padding=pad,
                                       dilation=opt.deform_offset_dilation)
                 self.offset_groups.append(_offset2d)
@@ -269,7 +280,8 @@ class DetectionHeader(nn.Module):
         for i in range(ratios):
             if opt.deformation:
                 if opt.cls_deform_layer.lower() == "normal":
-                    _deform = dcn.DeformConv(in_channel, num_classes, kernel_size=self.kernel_size,
+                    _deform = dcn.DeformConv(in_channel, num_classes,
+                                             kernel_size=self.kernel_size,
                                              padding=1, bias=False)
                 elif opt.cls_deform_layer.lower() == "incep":
                     _deform = DeformableInception(in_channel, num_classes,
@@ -281,8 +293,8 @@ class DetectionHeader(nn.Module):
                 _deform = nn.Conv2d(in_channel, num_classes, kernel_size=3, padding=1)
             self.conf_layers.append(_deform)
 
-    def forward(self, x, h, verbose=False, deform_map=False, priors=None, centeroids=None,
-                cfg=None, y=None):
+    def forward(self, x, h, verbose=False, deform_map=False, priors=None, prior_centroid=None,
+                rf_centroid=None, cfg=None, y=None):
         # regression is a list, the length of regression equals to the number different aspect ratio
         # under current receptive field, elements of regression are PyTorch Tensor, encoded in
         # point-form, represent the regressed prior boxes.
@@ -298,9 +310,10 @@ class DetectionHeader(nn.Module):
                 _deform_map = []
                 for i, reg in enumerate(regression):
                     # get the index of certain ratio from prior box
-                    idx = torch.tensor([i + len(regression) * _ for _ in range(reg.size(2) * reg.size(3))]).long()
+                    idx = torch.tensor([i + len(regression) * _
+                                        for _ in range(reg.size(2) * reg.size(3))]).long()
                     prior = priors[idx, :]
-                    prior_center = centeroids[idx, :].repeat(x.size(0), 1)
+                    centroid = rf_centroid[idx, :].repeat(x.size(0), 1)
                     _reg = decode(reg.permute(0, 2, 3, 1).contiguous().view(-1, 4),
                                   prior.repeat(x.size(0), 1), cfg["variance"]).clamp(min=0, max=1)
                     if self.opt.gt_replace:
@@ -310,19 +323,22 @@ class DetectionHeader(nn.Module):
                             _reg[t[1]] = y[t[0], :-1]
                             reg_i = t[1] // x.size(2)
                             reg_j = t[1] - (reg_i * x.size(2))
-                            regression[i][:, :, reg_i, reg_j] = encode(y[t[0]:t[0]+1, :-1], prior[t[1]:t[1]+1], cfg["variance"])
+                            regression[i][:, :, reg_i, reg_j] = \
+                                encode(y[t[0]:t[0]+1, :-1], prior[t[1]:t[1]+1], cfg["variance"])
                             #decode(regression[i][:, :, 11, 4], prior[t[1]].unsqueeze(0), cfg["variance"])
 
                     reg_center = center_conv_point(_reg)
                     #if 1 < x.size(2) <= 10:
-                        #visualize_box_and_center(_reg.view(x.size(0), reg.size(2) * reg.size(3), -1)[0], centeroids[idx, :],
-                                                 #reg_center.view(x.size(0), reg.size(2) * reg.size(3), -1)[0], i)
+                        #visualize_box_and_center(
+                            #_reg.view(x.size(0), reg.size(2) * reg.size(3), -1)[0],
+                            #centeroids[idx, :], reg_center.view(x.size(0),
+                            #reg.size(2) * reg.size(3), -1)[0], i)
                     # print(_reg[0, :].data, point_form(prior[0:1, :]).clamp(min=0, max=1).data)
                     # TODO: In the future work, when input image is not square, we need
                     # TODO: to multiply image with its both width and height
                     reg_center = reg_center.view(x.size(0), reg.size(2), reg.size(3), -1).permute(0, 3, 1, 2)
-                    prior_center = prior_center.view(x.size(0), reg.size(2), reg.size(3), -1).permute(0, 3, 1, 2)
-                    df_map = (reg_center - prior_center) * x.size(2)
+                    centroid = centroid.view(x.size(0), reg.size(2), reg.size(3), -1).permute(0, 3, 1, 2)
+                    df_map = (reg_center - centroid) * x.size(2)
                     if self.opt.cls_deform_layer.lower() == "normal":
                         _deform_map.append(df_map)
                     elif self.opt.cls_deform_layer.lower() == "incep":
@@ -332,7 +348,7 @@ class DetectionHeader(nn.Module):
                         for increment in self.opt.cls_deform_increment:
                             # Constrain the extended regression not to exceed the boundary of image
                             new_reg = (median + (reg_center - median) * increment).clamp(min=0, max=1)
-                            df_map.append((new_reg - prior_center) * x.size(2))
+                            df_map.append((new_reg - centroid) * x.size(2))
                         _deform_map.append(df_map)
                     else:
                         raise NotImplementedError()
