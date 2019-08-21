@@ -118,11 +118,11 @@ class SSD(nn.Module):
                     centeroid = self.prior_centeroids
                 if deform_map:
                   l, c, d = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                              centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
+                              centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg, y=y)
                   deform.append(d)
                 else:
                   l, c = h(x, input_h, deform_map=deform_map, priors=self.priors[x.device.index][start_id: end_id],
-                           centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg)
+                           centeroids=centeroid[x.device.index][start_id: end_id], cfg=self.cfg, y=y)
                 start_id = end_id
                 loc.append(l.permute(0, 2, 3, 1).contiguous())
                 conf.append(c.permute(0, 2, 3, 1).contiguous())
@@ -144,10 +144,7 @@ class SSD(nn.Module):
                 conf.view(conf.size(0), -1, self.num_classes),
                 self.priors
             )
-            if self.args.visualize_box:
-                loss_l, loss_c = self.criterion(output, y, y_idx, images=input)
-            else:
-                loss_l, loss_c = self.criterion(output, y, y_idx)
+            loss_l, loss_c = self.criterion(output, y, y_idx, images=input)
             #print(loss_l, loss_c)
             return loss_l.unsqueeze(0), loss_c.unsqueeze(0)
 
@@ -236,11 +233,10 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
 class DetectionHeader(nn.Module):
     def __init__(self, in_channel, ratios, num_classes, opt, ):
         super().__init__()
-        self.kernel_wise_deform = opt.kernel_wise_deform
-        self.deformation_source = opt.deformation_source
         self.kernel_size = 3
-        self.deformation = opt.deformation
         self.img_size = opt.img_size
+        self.opt = opt
+        self.deformation = opt.deformation
 
         self.loc_layers = nn.ModuleList([])
         for i in range(ratios):
@@ -272,12 +268,21 @@ class DetectionHeader(nn.Module):
         self.conf_layers = nn.ModuleList([])
         for i in range(ratios):
             if opt.deformation:
-                _deform = dcn.DeformConv(in_channel, num_classes, kernel_size=self.kernel_size, padding=1, bias=False)
+                if opt.cls_deform_layer.lower() == "normal":
+                    _deform = dcn.DeformConv(in_channel, num_classes, kernel_size=self.kernel_size,
+                                             padding=1, bias=False)
+                elif opt.cls_deform_layer.lower() == "incep":
+                    _deform = DeformableInception(in_channel, num_classes,
+                                                  inner_groups=len(opt.cls_deform_increment)+1,
+                                                  kernel_size=self.kernel_size, bias=False)
+                else:
+                    raise NotImplementedError()
             else:
                 _deform = nn.Conv2d(in_channel, num_classes, kernel_size=3, padding=1)
             self.conf_layers.append(_deform)
 
-    def forward(self, x, h, verbose=False, deform_map=False, priors=None, centeroids=None, cfg=None, y=None):
+    def forward(self, x, h, verbose=False, deform_map=False, priors=None, centeroids=None,
+                cfg=None, y=None):
         # regression is a list, the length of regression equals to the number different aspect ratio
         # under current receptive field, elements of regression are PyTorch Tensor, encoded in
         # point-form, represent the regressed prior boxes.
@@ -285,11 +290,11 @@ class DetectionHeader(nn.Module):
         if verbose:
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
         if self.deformation:
-            if self.deformation_source.lower() == "input":
+            if self.opt.deformation_source.lower() == "input":
                 _deform_map = [offset(x) for offset in self.offset_groups]
-            elif self.deformation_source.lower() == "regression":
+            elif self.opt.deformation_source.lower() == "regression":
                 _deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
-            elif self.deformation_source.lower() in ["geometric", "geometric_v2"]:
+            elif self.opt.deformation_source.lower() in ["geometric", "geometric_v2"]:
                 _deform_map = []
                 for i, reg in enumerate(regression):
                     # get the index of certain ratio from prior box
@@ -298,7 +303,7 @@ class DetectionHeader(nn.Module):
                     prior_center = centeroids[idx, :].repeat(x.size(0), 1)
                     _reg = decode(reg.permute(0, 2, 3, 1).contiguous().view(-1, 4),
                                   prior.repeat(x.size(0), 1), cfg["variance"]).clamp(min=0, max=1)
-                    if y is not None:
+                    if self.opt.gt_replace:
                         overlaps = jaccard(y[:, :-1], _reg)
                         tmp = (overlaps > 0.6).nonzero().tolist()
                         for t in tmp:
@@ -315,23 +320,33 @@ class DetectionHeader(nn.Module):
                     # print(_reg[0, :].data, point_form(prior[0:1, :]).clamp(min=0, max=1).data)
                     # TODO: In the future work, when input image is not square, we need
                     # TODO: to multiply image with its both width and height
+                    reg_center = reg_center.view(x.size(0), reg.size(2), reg.size(3), -1).permute(0, 3, 1, 2)
+                    prior_center = prior_center.view(x.size(0), reg.size(2), reg.size(3), -1).permute(0, 3, 1, 2)
                     df_map = (reg_center - prior_center) * x.size(2)
-                    _deform_map.append(df_map.view(x.size(0), reg.size(2), reg.size(3), -1)
-                                       .permute(0, 3, 1, 2))
-            elif self.deformation_source.lower() == "concate":
-                # TODO: reimplement forward graph
+                    if self.opt.cls_deform_layer.lower() == "normal":
+                        _deform_map.append(df_map)
+                    elif self.opt.cls_deform_layer.lower() == "incep":
+                        df_map = [df_map]
+                        median = int(reg_center.size(1) / 2)
+                        median = reg_center[:, median-1:median+1, :, :].repeat(1, self.kernel_size**2, 1, 1)
+                        for increment in self.opt.cls_deform_increment:
+                            # Constrain the extended regression not to exceed the boundary of image
+                            new_reg = (median + (reg_center - median) * increment).clamp(min=0, max=1)
+                            df_map.append((new_reg - prior_center) * x.size(2))
+                        _deform_map.append(df_map)
+                    else:
+                        raise NotImplementedError()
+            elif self.opt.deformation_source.lower() == "concate":
                 raise NotImplementedError()
             else:
                 raise NotImplementedError()
 
             if verbose:
                 print("deform_map shape is composed of %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
-            if self.kernel_wise_deform:
+            if self.opt.kernel_wise_deform:
                 _deform_map = [dm.repeat(1, self.kernel_size ** 2, 1, 1) for dm in _deform_map]
-            # Amplify the offset signal, so it can deform the kernel to adjacent anchor
-            #_deform_map = [dm * h/x.size(2) for dm in _deform_map]
-            if verbose:
-                print("deform_map shape is extended to %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
+                if verbose:
+                    print("deform_map shape is extended to %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
             pred = [deform(x, _deform_map[i]) for i, deform in enumerate(self.conf_layers)]
         else:
             pred = [conf(x) for conf in self.conf_layers]
@@ -342,6 +357,23 @@ class DetectionHeader(nn.Module):
             return torch.cat(regression, dim=1), torch.cat(pred, dim=1), _deform_map
         else:
             return torch.cat(regression, dim=1), torch.cat(pred, dim=1)
+
+
+class DeformableInception(nn.Module):
+    def __init__(self, in_channel, num_classes, inner_groups=2, kernel_size=3, bias=False):
+        super().__init__()
+        self.inner_blocks = nn.ModuleList([])
+        for i in range(inner_groups):
+            self.inner_blocks.append(dcn.DeformConv(in_channel, num_classes,
+                                                    kernel_size=kernel_size, padding=1, bias=bias))
+        self.final_block = nn.Conv2d(inner_groups * num_classes, num_classes,
+                                     kernel_size=kernel_size, padding=1)
+
+    def forward(self, x, deform_map):
+        assert len(deform_map) == len(self.inner_blocks)
+        out = [block(x, deform_map[i]) for i, block in enumerate(self.inner_blocks)]
+        out = self.final_block(torch.cat(out, dim=1))
+        return out
 
 def visualize_box_and_center(box, centeroid, reg_center, idx, img_size=300):
     """

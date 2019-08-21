@@ -78,7 +78,7 @@ class MultiBoxLoss(nn.Module):
             #labels = targets[idx][:, -1].data
             if self.rematch:
                 defaults = center_size(decode(loc_data[idx], priors.data, self.variance).clamp(min=0, max=1))
-                if images is not None:
+                if self.args.visualize_box:
                     start_idx = priors.device.index * batch_num + idx
                     _target = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], :].data
                     visualize_bbox(self.args, cfg, images[idx:idx+1], [_target], defaults, 0, prefix="reg", start_idx=start_idx)
