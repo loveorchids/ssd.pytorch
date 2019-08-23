@@ -420,6 +420,9 @@ def visualize_box_and_center(box, centeroid, reg_center, idx, img_size=300):
     imageio.mimsave("/home/wang/Pictures/fm_%s_ratio_%s.gif"%(box.size(0), str(idx).zfill(2)), gif)
     #cv2.imwrite("/home/wang/Pictures/tmp_%s.jpg"%str(i).zfill(3), canvas)
 
+class FPN(nn.Module):
+    def __init__(self):
+        super().__init__()
 
 
 base = {
