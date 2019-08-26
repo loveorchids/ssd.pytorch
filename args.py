@@ -54,11 +54,23 @@ def prepare_args(root_dir):
 
     parser.add_argument('--cls_deform_layer', default="normal", type=str,
                         help='deformation layer for classification')
+    parser.add_argument('--cls_deform_filters', default=21, type=int,
+                        help='filter numbers of deformation layer for classification')
     parser.add_argument('--cls_deform_increment', nargs='+', default=[2],
-                        help='increment in cls deformation')
-    parser.add_argument("--cascade", type=int, help="detector top_k", default=1)
+                        help='increment in classification deformation')
+
+    parser.add_argument('--loc_deformation', action="store_true",
+                        help='use deformation in localization head')
     parser.add_argument('--loc_deform_layer', default="normal", type=str,
                         help='deformation layer for localization')
+    parser.add_argument('--loc_deform_filters', default=21, type=int,
+                        help='filter numbers of deformation layer for localization')
+    parser.add_argument('--loc_deform_increment', nargs='+', default=[2],
+                        help='increment in localization deformation')
+
+    parser.add_argument("--concat_block", action="store_true",
+                        help="if true, we will use 1x1 convolution to concat the Deformable inception layer")
+    parser.add_argument("--cascade", type=int, help="detector top_k", default=1)
     parser.add_argument("--top_k", type=int, help="detector top_k", default=200)
     parser.add_argument("--conf_threshold", type=float, default=0.01,
                         help="detector_conf_threshold")

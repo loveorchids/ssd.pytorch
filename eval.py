@@ -356,7 +356,8 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
         detections = detections.data
 
         if args.visualize_regbox:
-            visualize_bbox(args, voc, x, [torch.cuda.FloatTensor(gt)], center_size(reg_boxes.squeeze(0)), i, prefix="v4_16k")
+            visualize_bbox(args, voc, x, [torch.cuda.FloatTensor(gt)], center_size(reg_boxes.squeeze(0)), i,
+                           prefix="v4_16k", path=os.path.expanduser("~/Pictures/deform_vis_%s" % args.name))
             continue
         if args.visualize_box:
             cls = detections[0, 1:, :, 0]

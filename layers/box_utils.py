@@ -250,16 +250,58 @@ def nms(boxes, scores, overlap=0.5, top_k=200):
 def center_conv_point(bboxes, kernel_size=3, c_min=0, c_max=1):
     """In a parallel manner also keeps the gradient during BP"""
     bboxes.clamp_(min=c_min, max=c_max)
+    ratios = (bboxes[:, 2] - bboxes[:, 0]) / (bboxes[:, 3] - bboxes[:, 1])
+    # ratios计算方法为宽高比，所以small_idx代表比较高的box
+    small_idx = ratios < 1
+    one_idx = (ratios >= 0.9) * (ratios <= 1.1)
+    # 将ratios中所有小于1的index取倒数
+    ratios[small_idx] = 1 / ratios[small_idx]
+    offsets = ratios / (kernel_size ** 2)
+    offsets[one_idx] = 0
+    offsets = offsets.unsqueeze(-1).repeat(1, 2 * kernel_size ** 2)
+
+    assert kernel_size == 3, "下方的偏移量是为kernel size为3时设计的"
+    distortion = torch.FloatTensor([-1, 0, -1, 0, -1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0]).cuda(bboxes.device.index)
+    distortion2 = distortion.view(kernel_size, kernel_size, 2).permute(1, 0, 2)[:, :, (1, 0)].contiguous().view(-1)
+    distortions = distortion.unsqueeze(0).repeat(bboxes.size(0), 1)
+    distortions[small_idx] = distortion2
+    distortions = distortions * offsets
+    noise = torch.randn(distortions.size(0)) < 0
+    # 产生随机偏移方向。如果box较高，左侧的centroid会向上也会向下偏移（右侧与左侧相反）
+    # 如果box较宽，上方的点会向左或向右偏移（上方与下方偏移方向相反）
+    distortions[noise] = distortions[noise] * -1
+
+    ratios = (bboxes[:, 2] - bboxes[:, 0]) / (bboxes[:, 3] - bboxes[:, 1])
+    max_length = torch.max(torch.stack(((bboxes[:, 2] - bboxes[:, 0]), (bboxes[:, 3] - bboxes[:, 1])), dim=1), dim=1)[0]
+    # ratios计算方法为宽高比，所以small_idx代表比较高的box
+    small_idx = ratios < 1
+    one_idx = (ratios >= 0.9) * (ratios <= 1.1)
+    # 将ratios中所有小于1的index取倒数
+    ratios[small_idx] = 1 / ratios[small_idx]
+    # offsets = ratios / (kernel_size ** 2)
+    # offsets = (torch.tanh(0.3 * (ratios - 5)) / 2 + 0.5) * max_length / (kernel_size ** 2)
+    offsets = torch.tanh(0.25 * ratios) * max_length / (kernel_size ** 2)
+    offsets[one_idx] = 0
+    offsets = offsets.unsqueeze(-1).repeat(1, 2 * kernel_size ** 2)
+
+    assert kernel_size == 3, "偏移量是为kernel size=3时设计的"
+    distortion = torch.FloatTensor([-1, 0, -1, 0, -1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0]).cuda(bboxes.device.index)
+    distortion2 = distortion.view(kernel_size, kernel_size, 2).permute(1, 0, 2)[:, :, (1, 0)].contiguous().view(-1)
+    distortions = distortion.unsqueeze(0).repeat(bboxes.size(0), 1)
+    distortions[small_idx] = distortion2
+    distortions = distortions * offsets
+
     base = torch.cat([bboxes[:, :2]] * (kernel_size ** 2), dim=1)
     multiplier = torch.tensor([(2 * i + 1) / kernel_size / 2
                                for i in range(kernel_size)]).cuda(bboxes.device.index)
+    # multiplier生成的时候顺序先从上往下数，再从左往右数
+    # 应当换成先从左往右数，再从上往下数的顺序，所以有了[:, :, (1, 0)]
     multiplier = torch.stack(torch.meshgrid([multiplier, multiplier]),
-                             dim=-1).contiguous().view(-1)
+                             dim=-1)[:, :, (1, 0)].contiguous().view(-1)
     multiplier = multiplier.unsqueeze(0).repeat(bboxes.size(0), 1)
-    center = torch.stack([bboxes[:, 2] - bboxes[:, 0], bboxes[:, 3] - bboxes[:, 1]],
-                         dim=-1)
+    center = torch.stack([bboxes[:, 2] - bboxes[:, 0], bboxes[:, 3] - bboxes[:, 1]], dim=-1)
     center = torch.cat([center] * (kernel_size ** 2), dim=1)
-    return base + center * multiplier
+    return base + center * multiplier + distortions
 
 
 def measure(pred_boxes, gt_boxes, width, height):

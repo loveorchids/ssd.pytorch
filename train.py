@@ -1,7 +1,8 @@
+import matplotlib
+matplotlib.use('Agg')
 from data import *
 from layers.box_utils import *
 from utils.augmentations import SSDAugmentation
-from layers.modules import MultiBoxLoss
 from ssd import build_ssd
 import os, datetime
 import sys
@@ -19,8 +20,7 @@ import numpy as np
 from args import prepare_args
 import mmdet.ops.dcn as dcn
 from layers.visualization import *
-import matplotlib
-matplotlib.use('Agg')
+
 
 args = prepare_args(VOC_ROOT)
 TMPJPG = os.path.expanduser("~/Pictures/tmp.jpg")

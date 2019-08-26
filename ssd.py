@@ -249,7 +249,16 @@ class DetectionHeader(nn.Module):
 
         self.loc_layers = nn.ModuleList([])
         for i in range(ratios):
-            self.loc_layers.append(nn.Conv2d(in_channel, 4, kernel_size=3, padding=1))
+            if opt.loc_deformation:
+                if opt.loc_deform_layer.lower() == "normal":
+                    self.loc_layers.append(nn.Conv2d(in_channel, 4, kernel_size=3, padding=1))
+                elif opt.loc_deform_layer.lower() == "incep":
+                    self.loc_layers.append(DeformableInception(in_channel, 4, filters=opt.loc_deform_filters,
+                                                               inner_groups=len(opt.loc_deform_increment)+1,))
+                else:
+                    raise NotImplementedError()
+            else:
+                self.loc_layers.append(nn.Conv2d(in_channel, 4, kernel_size=3, padding=1))
 
         if opt.deformation and \
             opt.deformation_source.lower() not in ["geometric", "geometric_v2"]:
@@ -284,7 +293,7 @@ class DetectionHeader(nn.Module):
                                              kernel_size=self.kernel_size,
                                              padding=1, bias=False)
                 elif opt.cls_deform_layer.lower() == "incep":
-                    _deform = DeformableInception(in_channel, num_classes,
+                    _deform = DeformableInception(in_channel, num_classes, filters=opt.cls_deform_filters,
                                                   inner_groups=len(opt.cls_deform_increment)+1,
                                                   kernel_size=self.kernel_size, bias=False)
                 else:
@@ -298,16 +307,41 @@ class DetectionHeader(nn.Module):
         # regression is a list, the length of regression equals to the number different aspect ratio
         # under current receptive field, elements of regression are PyTorch Tensor, encoded in
         # point-form, represent the regressed prior boxes.
-        regression = [loc(x) for loc in self.loc_layers]
+        # regression = [loc(x) for loc in self.loc_layers]
+        regression = []
+        loc_deform_map = []
+        for i, loc in enumerate(self.loc_layers):
+            idx = torch.tensor([i + len(self.loc_layers) * _
+                                for _ in range(x.size(2) * x.size(3))]).long()
+            reg_center = prior_centroid[idx, :].repeat(x.size(0), 1)
+            centroid = rf_centroid[idx, :].repeat(x.size(0), 1)
+            df_map = (reg_center - centroid) * x.size(2)
+            df_map = df_map.view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
+            if self.opt.cls_deform_layer.lower() == "normal":
+                loc_deform_map.append(df_map)
+            elif self.opt.cls_deform_layer.lower() == "incep":
+                df_map = [df_map]
+                median = int(reg_center.size(1) / 2)
+                median = reg_center[:, median - 1:median + 1, :, :].repeat(1, self.kernel_size ** 2, 1, 1)
+                for increment in self.opt.cls_deform_increment:
+                    # Constrain the extended regression not to exceed the boundary of image
+                    new_reg = (median + (reg_center - median) * increment).clamp(min=0, max=1)
+                    df_map.append((new_reg - centroid) * x.size(2))
+                    loc_deform_map.append(df_map)
+            else:
+                raise NotImplementedError()
+
+
+
         if verbose:
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
         if self.deformation:
             if self.opt.deformation_source.lower() == "input":
-                _deform_map = [offset(x) for offset in self.offset_groups]
+                cls_deform_map = [offset(x) for offset in self.offset_groups]
             elif self.opt.deformation_source.lower() == "regression":
-                _deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
+                cls_deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
             elif self.opt.deformation_source.lower() in ["geometric", "geometric_v2"]:
-                _deform_map = []
+                cls_deform_map = []
                 for i, reg in enumerate(regression):
                     # get the index of certain ratio from prior box
                     idx = torch.tensor([i + len(regression) * _
@@ -340,7 +374,7 @@ class DetectionHeader(nn.Module):
                     centroid = centroid.view(x.size(0), reg.size(2), reg.size(3), -1).permute(0, 3, 1, 2)
                     df_map = (reg_center - centroid) * x.size(2)
                     if self.opt.cls_deform_layer.lower() == "normal":
-                        _deform_map.append(df_map)
+                        cls_deform_map.append(df_map)
                     elif self.opt.cls_deform_layer.lower() == "incep":
                         df_map = [df_map]
                         median = int(reg_center.size(1) / 2)
@@ -349,7 +383,7 @@ class DetectionHeader(nn.Module):
                             # Constrain the extended regression not to exceed the boundary of image
                             new_reg = (median + (reg_center - median) * increment).clamp(min=0, max=1)
                             df_map.append((new_reg - centroid) * x.size(2))
-                        _deform_map.append(df_map)
+                        cls_deform_map.append(df_map)
                     else:
                         raise NotImplementedError()
             elif self.opt.deformation_source.lower() == "concate":
@@ -358,37 +392,50 @@ class DetectionHeader(nn.Module):
                 raise NotImplementedError()
 
             if verbose:
-                print("deform_map shape is composed of %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
+                print("deform_map shape is composed of %d %s" % (len(cls_deform_map), str(cls_deform_map[0].shape)))
             if self.opt.kernel_wise_deform:
-                _deform_map = [dm.repeat(1, self.kernel_size ** 2, 1, 1) for dm in _deform_map]
+                cls_deform_map = [dm.repeat(1, self.kernel_size ** 2, 1, 1) for dm in cls_deform_map]
                 if verbose:
-                    print("deform_map shape is extended to %d %s" % (len(_deform_map), str(_deform_map[0].shape)))
-            pred = [deform(x, _deform_map[i]) for i, deform in enumerate(self.conf_layers)]
+                    print("deform_map shape is extended to %d %s" % (len(cls_deform_map), str(cls_deform_map[0].shape)))
+            pred = [deform(x, cls_deform_map[i]) for i, deform in enumerate(self.conf_layers)]
         else:
             pred = [conf(x) for conf in self.conf_layers]
-            _deform_map = None
+            cls_deform_map = None
         if verbose:
             print("pred shape is composed of %d %s" % (len(pred), str(pred[0].shape)))
         if deform_map:
-            return torch.cat(regression, dim=1), torch.cat(pred, dim=1), _deform_map
+            return torch.cat(regression, dim=1), torch.cat(pred, dim=1), cls_deform_map
         else:
             return torch.cat(regression, dim=1), torch.cat(pred, dim=1)
 
 
 class DeformableInception(nn.Module):
-    def __init__(self, in_channel, num_classes, inner_groups=2, kernel_size=3, bias=False):
+    def __init__(self, in_channel, num_classes, inner_groups=2, filters=None, kernel_size=3,
+                 bias=False, concat_block=False):
         super().__init__()
         self.inner_blocks = nn.ModuleList([])
+        self.concat_block = concat_block
+        if filters:
+            out_dim = filters
+        else:
+            out_dim = num_classes
         for i in range(inner_groups):
-            self.inner_blocks.append(dcn.DeformConv(in_channel, num_classes,
+            self.inner_blocks.append(dcn.DeformConv(in_channel, out_dim,
                                                     kernel_size=kernel_size, padding=1, bias=bias))
-        self.final_block = nn.Conv2d(inner_groups * num_classes, num_classes,
+        if concat_block:
+            self.concat_block = nn.Conv2d(inner_groups * out_dim, inner_groups * out_dim,
+                                         kernel_size=1, padding=0)
+        self.final_block = nn.Conv2d(inner_groups * out_dim, num_classes,
                                      kernel_size=kernel_size, padding=1)
 
     def forward(self, x, deform_map):
         assert len(deform_map) == len(self.inner_blocks)
         out = [block(x, deform_map[i]) for i, block in enumerate(self.inner_blocks)]
-        out = self.final_block(torch.cat(out, dim=1))
+        if self.concat_block:
+            out = self.concat_block(torch.cat(out, dim=1))
+            out = self.final_block(out)
+        else:
+            out = self.final_block(torch.cat(out, dim=1))
         return out
 
 def visualize_box_and_center(box, centeroid, reg_center, idx, img_size=300):

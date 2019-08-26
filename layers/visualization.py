@@ -136,7 +136,7 @@ def visualize_overlaps(args, cfg, target, label, prior, after_reg=False):
     return images, summary, subtitle, coords
 
 
-def visualize_bbox(args, cfg, images, targets, prior=None, idx=0, prefix="", start_idx=0):
+def visualize_bbox(args, cfg, images, targets, prior=None, idx=0, prefix="", start_idx=0, path=None):
     print("Visualizing bound box...")
     ratios = images.size(3) / images.size(2)
     batch = images.size(0)
@@ -188,6 +188,8 @@ def visualize_bbox(args, cfg, images, targets, prior=None, idx=0, prefix="", sta
             _prefix = "sample"
         else:
             _prefix = prefix
-        plt.savefig(os.path.join(args.val_log, "batch_%s_%s_vis_%s.jpg" % (idx, _prefix, start_idx + i)))
+        if path is None:
+            path = args.val_log
+        plt.savefig(os.path.join(path, "batch_%s_%s_vis_%s.jpg" % (idx, _prefix, start_idx + i)))
         plt.close()
 
