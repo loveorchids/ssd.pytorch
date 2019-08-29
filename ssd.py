@@ -31,6 +31,8 @@ class SSD(nn.Module):
 
     def __init__(self, args, phase, size, base, extras, head, num_classes):
         super(SSD, self).__init__()
+        self.size = size
+        self.args = args
         self.phase = phase
         self.num_classes = num_classes
         self.cfg = (coco, voc)[num_classes == 21]
@@ -40,12 +42,7 @@ class SSD(nn.Module):
         rf_prior = rf_Box.forward()
         self.priors = [prior.cuda(i) for i in range(torch.cuda.device_count())]
         self.rf_priors = [rf_prior.cuda(i) for i in range(torch.cuda.device_count())]
-        self.prior_centeroids = [center_conv_point(point_form(prior).clamp(min=0, max=1))
-                                 for prior in self.priors]
-        self.rf_prior_centeroids = [center_conv_point(point_form(rf_prior))
-                                 for rf_prior in self.rf_priors]
-        self.size = size
-        self.args = args
+        self.create_centroid()
         # SSD network
         self.vgg = nn.ModuleList(base)
         # Layer learns to scale the l2 normalized features from conv4_3
@@ -62,6 +59,14 @@ class SSD(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         self.detect = Detect(num_classes, bkg_label=0, top_k=args.top_k,
                              conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
+
+    def create_centroid(self):
+        self.prior_centeroids = [center_conv_point(point_form(prior).clamp(min=0, max=1),
+                                                   v3_form=self.args.deformation_source.lower() == "geometric_v3")
+                                 for prior in self.priors]
+        self.rf_prior_centeroids = [center_conv_point(point_form(rf_prior),
+                                                      v3_form=self.args.deformation_source.lower() == "geometric_v3")
+                                    for rf_prior in self.rf_priors]
 
     def forward(self, input, y=None, y_idx=None, deform_map=False, test=False):
         """Applies network layers and ops on input image(s) x.
@@ -219,8 +224,10 @@ def multibox(vgg, extra_layers, cfg, num_classes, opt):
             if opt.implementation == "190709":
                 if k > 4:
                     opt.deformation = False
+                    opt.loc_deformation = False
             else:
                 opt.deformation = False
+                opt.loc_deformation = False
             header += [DetectionHeader(v.out_channels, cfg[k], num_classes, opt)]
         return vgg, extra_layers, header
     elif opt.implementation == "vanilla":
@@ -246,6 +253,7 @@ class DetectionHeader(nn.Module):
         self.img_size = opt.img_size
         self.opt = opt
         self.deformation = opt.deformation
+        self.loc_deformation = opt.loc_deformation
 
         self.loc_layers = nn.ModuleList([])
         for i in range(ratios):
@@ -254,14 +262,15 @@ class DetectionHeader(nn.Module):
                     self.loc_layers.append(nn.Conv2d(in_channel, 4, kernel_size=3, padding=1))
                 elif opt.loc_deform_layer.lower() == "incep":
                     self.loc_layers.append(DeformableInception(in_channel, 4, filters=opt.loc_deform_filters,
-                                                               inner_groups=len(opt.loc_deform_increment)+1,))
+                                                               inner_groups=len(opt.loc_deform_increment)+1,
+                                                               concat_block=opt.concat_block))
                 else:
                     raise NotImplementedError()
             else:
                 self.loc_layers.append(nn.Conv2d(in_channel, 4, kernel_size=3, padding=1))
 
         if opt.deformation and \
-            opt.deformation_source.lower() not in ["geometric", "geometric_v2"]:
+            opt.deformation_source.lower() not in ["geometric", "geometric_v2", "geometric_v3"]:
             self.offset_groups = nn.ModuleList([])
             if opt.deformation_source.lower() == "input":
                 # Previous version, represent deformation_source is True
@@ -307,32 +316,33 @@ class DetectionHeader(nn.Module):
         # regression is a list, the length of regression equals to the number different aspect ratio
         # under current receptive field, elements of regression are PyTorch Tensor, encoded in
         # point-form, represent the regressed prior boxes.
-        # regression = [loc(x) for loc in self.loc_layers]
-        regression = []
-        loc_deform_map = []
-        for i, loc in enumerate(self.loc_layers):
-            idx = torch.tensor([i + len(self.loc_layers) * _
-                                for _ in range(x.size(2) * x.size(3))]).long()
-            reg_center = prior_centroid[idx, :].repeat(x.size(0), 1)
-            centroid = rf_centroid[idx, :].repeat(x.size(0), 1)
-            df_map = (reg_center - centroid) * x.size(2)
-            df_map = df_map.view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
-            if self.opt.cls_deform_layer.lower() == "normal":
-                loc_deform_map.append(df_map)
-            elif self.opt.cls_deform_layer.lower() == "incep":
-                df_map = [df_map]
-                median = int(reg_center.size(1) / 2)
-                median = reg_center[:, median - 1:median + 1, :, :].repeat(1, self.kernel_size ** 2, 1, 1)
-                for increment in self.opt.cls_deform_increment:
-                    # Constrain the extended regression not to exceed the boundary of image
-                    new_reg = (median + (reg_center - median) * increment).clamp(min=0, max=1)
-                    df_map.append((new_reg - centroid) * x.size(2))
-                    loc_deform_map.append(df_map)
-            else:
-                raise NotImplementedError()
-
-
-
+        if self.loc_deformation:
+            regression = []
+            for i, loc in enumerate(self.loc_layers):
+                idx = torch.tensor([i + len(self.loc_layers) * _
+                                    for _ in range(x.size(2) * x.size(3))]).long()
+                reg_center = prior_centroid[idx, :].repeat(x.size(0), 1).view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
+                centroid = rf_centroid[idx, :].repeat(x.size(0), 1).view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
+                df_map = (reg_center - centroid) * x.size(2)
+                if self.opt.loc_deform_layer.lower() == "normal":
+                    regression.append(loc(x, df_map))
+                elif self.opt.loc_deform_layer.lower() == "incep":
+                    df_map = [df_map]
+                    median = int(reg_center.size(1) / 2)
+                    median = reg_center[:, median - 1:median + 1, :, :].repeat(1, self.kernel_size ** 2, 1, 1)
+                    for increment in self.opt.cls_deform_increment:
+                        # Constrain the extended regression not to exceed the boundary of image
+                        new_reg = (median + (reg_center - median) * increment).clamp(min=0, max=1)
+                        df_map.append((new_reg - centroid) * x.size(2))
+                    regression.append(loc(x, df_map))
+                else:
+                    raise NotImplementedError()
+                #if x.size(2) == 10:
+                    #boxes =decode(regression[-1].permute(0, 2, 3, 1).contiguous().view(-1, 4),
+                                  #priors[idx], cfg["variance"]).clamp(min=0, max=1)
+                    #visualize_box_and_center(i, centroid, prior=point_form(priors[idx]), reg=boxes, df_map=df_map)
+        else:
+            regression = [loc(x) for loc in self.loc_layers]
         if verbose:
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
         if self.deformation:
@@ -340,14 +350,17 @@ class DetectionHeader(nn.Module):
                 cls_deform_map = [offset(x) for offset in self.offset_groups]
             elif self.opt.deformation_source.lower() == "regression":
                 cls_deform_map = [offset(regression[i]) for i, offset in enumerate(self.offset_groups)]
-            elif self.opt.deformation_source.lower() in ["geometric", "geometric_v2"]:
+            elif self.opt.deformation_source.lower() in ["geometric", "geometric_v2", "geometric_v3"]:
                 cls_deform_map = []
                 for i, reg in enumerate(regression):
                     # get the index of certain ratio from prior box
                     idx = torch.tensor([i + len(regression) * _
                                         for _ in range(reg.size(2) * reg.size(3))]).long()
                     prior = priors[idx, :]
-                    centroid = rf_centroid[idx, :].repeat(x.size(0), 1)
+                    if self.opt.deformation_source.lower() == "geometric":
+                        centroid = prior_centroid[idx, :].repeat(x.size(0), 1)
+                    else:
+                        centroid = rf_centroid[idx, :].repeat(x.size(0), 1)
                     _reg = decode(reg.permute(0, 2, 3, 1).contiguous().view(-1, 4),
                                   prior.repeat(x.size(0), 1), cfg["variance"]).clamp(min=0, max=1)
                     if self.opt.gt_replace:
@@ -361,11 +374,12 @@ class DetectionHeader(nn.Module):
                                 encode(y[t[0]:t[0]+1, :-1], prior[t[1]:t[1]+1], cfg["variance"])
                             #decode(regression[i][:, :, 11, 4], prior[t[1]].unsqueeze(0), cfg["variance"])
 
-                    reg_center = center_conv_point(_reg)
-                    #if 1 < x.size(2) <= 10:
+                    reg_center = center_conv_point(_reg,
+                                                   v3_form=self.opt.deformation_source.lower() == "geometric_v3")
+                    #if x.size(2) == 10:
                         #visualize_box_and_center(
                             #_reg.view(x.size(0), reg.size(2) * reg.size(3), -1)[0],
-                            #centeroids[idx, :], reg_center.view(x.size(0),
+                            #centroid[idx, :], reg_center.view(x.size(0),
                             #reg.size(2) * reg.size(3), -1)[0], i)
                     # print(_reg[0, :].data, point_form(prior[0:1, :]).clamp(min=0, max=1).data)
                     # TODO: In the future work, when input image is not square, we need
@@ -438,33 +452,65 @@ class DeformableInception(nn.Module):
             out = self.final_block(torch.cat(out, dim=1))
         return out
 
-def visualize_box_and_center(box, centeroid, reg_center, idx, img_size=300):
+def visualize_box_and_center(idx, rf_centeroid, prior=None, reg=None,
+                             prior_centroid=None, df_map=None, img_size=300):
     """
-    :param box: shape=(?, 4)
-    :param centeroid: shape=(?, 18)
+    :param prior: shape=(?, 4)
+    :param rf_centeroid: shape=(?, 18)
     :return:
     """
+    h, w = rf_centeroid.size(2), rf_centeroid.size(2)
     bg = cv2.imread("/home/wang/Pictures/tmp.jpg")
-    bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
-    box = box * img_size
-    centeroid = centeroid * img_size
-    reg_center = reg_center * img_size
+    if bg is None:
+        bg = np.ones((img_size, img_size, 3)) * 255
+    else:
+        bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
+    if prior is not None:
+        prior = prior * img_size
+    if reg is not None:
+        reg = reg * img_size
+    if rf_centeroid is not None:
+        rf_centeroid = (rf_centeroid.permute(0, 2, 3, 1).view(rf_centeroid.size(0), -1,
+                                                              rf_centeroid.size(1)) * img_size).long().squeeze(0)
+    if prior_centroid is not None:
+        prior_centroid = (prior_centroid.permute(0, 2, 3, 1).view(prior_centroid.size(0), -1,
+                                                                  prior_centroid.size(1)) * prior_centroid).long().squeeze(0)
+    if df_map is not None:
+        if type(df_map) is not list:
+            df_map = [df_map]
+        df_map = [rf_centeroid + (df.permute(0, 2, 3, 1).view(df.size(0), -1, df.size(1)) * img_size / h).long().squeeze(0)
+                  for df in df_map]
+
     gif = []
-    for i in range(box.size(0)):
-        canvas = np.ones((img_size, img_size, 3)) * 200
-        x1, y1, x2, y2 = box[i].tolist()
-        #print("img: %s"%str(i).zfill(3))
-        #print(centeroid[i])
-        #print(reg_center[i])
-        points = centeroid[i].view(-1, 2).tolist()
-        reg_points = reg_center[i].view(-1, 2).tolist()
-        cv2.rectangle(canvas, (round(x1), round(y1)), (round(x2), round(y2)), (255, 0, 0), 2)
+    for i in range(rf_centeroid.size(0)):
+        canvas = np.ones((img_size, img_size, 3)) * 128
+        if prior is not None:
+            x1, y1, x2, y2 = prior[i].tolist()
+            cv2.rectangle(canvas, (round(x1), round(y1)), (round(x2), round(y2)), (0, 255, 0), 2)
+        if reg is not None:
+            x1, y1, x2, y2 = reg[i].tolist()
+            cv2.rectangle(canvas, (round(x1), round(y1)), (round(x2), round(y2)), (0, 0, 255), 1)
+
+        points = rf_centeroid[i].view(-1, 2).tolist()
         for point in points:
-            cv2.circle(canvas, (round(point[0]), round(point[1])), 3, (0, 0, 255), 2)
-        for point in reg_points:
-            cv2.circle(canvas, (round(point[0]), round(point[1])), 3, (0, 255, 0), 2)
-        gif.append((bg * 0.5 + canvas * 0.5).astype(np.uint8))
-    imageio.mimsave("/home/wang/Pictures/fm_%s_ratio_%s.gif"%(box.size(0), str(idx).zfill(2)), gif)
+            cv2.circle(canvas, (round(point[1]), round(point[0])), 2, (255, 0, 0), 2)
+
+        if prior_centroid is not None:
+            points = prior_centroid[i].view(-1, 2).tolist()
+            for point in points:
+                cv2.circle(canvas, (round(point[1]), round(point[0])), 2, (0, 255, 0), 2)
+
+        if df_map is not None:
+            for df in df_map:
+                reg_points = df[i].view(-1, 2).tolist()
+                for point in reg_points:
+                    cv2.circle(canvas, (round(point[1]), round(point[0])), 2, (0, 0, 255), 2)
+        if bg is None:
+            gif.append(bg.astype(np.uint8))
+        else:
+            gif.append((bg * 0.5 + canvas * 0.5).astype(np.uint8))
+    imageio.mimsave("/home/wang/Pictures/fm_%s_ratio_%s.gif" %
+                    (rf_centeroid.size(0), str(idx).zfill(2)), gif)
     #cv2.imwrite("/home/wang/Pictures/tmp_%s.jpg"%str(i).zfill(3), canvas)
 
 class FPN(nn.Module):
@@ -475,15 +521,16 @@ class FPN(nn.Module):
 base = {
     '300': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'C', 512, 512, 512, 'M',
             512, 512, 512],
-    '512': [],
+    '512': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'C', 512, 512, 512, 'M',
+            512, 512, 512],
 }
 extras = {
     '300': [256, 'S', 512, 128, 'S', 256, 128, 256, 128, 256],
-    '512': [],
+    '512': [256, 'S', 512, 128, 'S', 256, 128, 256, 128, 256],
 }
 mbox = {
     '300': [4, 6, 6, 6, 4, 4],  # number of boxes per feature map location
-    '512': [],
+    '512': [4, 6, 6, 6, 4, 4],
 }
 
 

@@ -63,7 +63,7 @@ def prepare_args(root_dir):
                         help='use deformation in localization head')
     parser.add_argument('--loc_deform_layer', default="normal", type=str,
                         help='deformation layer for localization')
-    parser.add_argument('--loc_deform_filters', default=21, type=int,
+    parser.add_argument('--loc_deform_filters', default=4, type=int,
                         help='filter numbers of deformation layer for localization')
     parser.add_argument('--loc_deform_increment', nargs='+', default=[2],
                         help='increment in localization deformation')
@@ -102,7 +102,7 @@ def prepare_args(root_dir):
                         help='Number of workers used in dataloading')
 
     # Optimizer
-    parser.add_argument('--optimizer', default="adam", type=str, choices=["adam", "sgd"],
+    parser.add_argument('--optimizer', default="adam", type=str, choices=["adam", "sgd", "super"],
                         help='which optimizer to use.')
     parser.add_argument('--lr', '--learning-rate', default=1e-4, type=float,
                         help='initial learning rate')

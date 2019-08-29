@@ -8,6 +8,7 @@ import os, datetime
 import sys
 sys.path.append(os.path.expanduser("~/Documents"))
 import omni_torch.visualize.basic as vb
+from omni_torch.networks.optimizer import *
 import time
 import torch
 from torch.autograd import Variable
@@ -39,6 +40,8 @@ def fit(args, cfg, net, dataset, optimizer, is_train=True):
         eval_results = []
     start_time = time.time()
     for batch_idx, (images, targets, img_shape) in enumerate(dataset):
+        if not is_train and batch_idx >= 10:
+            break
         # if not net.fix_size:
         # assert images.size(0) == 1, "batch size for dynamic input shape can only be 1 for 1 GPU RIGHT NOW!"
         if len(targets) == 0:
@@ -232,6 +235,8 @@ def main():
     elif args.optimizer.lower() == "sgd":
         optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum,
                               weight_decay=args.weight_decay)
+    elif args.optimizer.lower() == "super":
+        optimizer = SuperConv(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     #criterion = MultiBoxLoss(cfg['num_classes'], args.overlap_threshold, True, 0,
                              #True, 3, 0.5, False, args.cuda, rematch=args.rematch)
 
@@ -242,7 +247,7 @@ def main():
         loc_loss.append(loc_avg)
         conf_loss.append(conf_avg)
         train_losses = [np.asarray(loc_loss), np.asarray(conf_loss)]
-        if val_set is not None and epoch != 0 and epoch % 5 == 0:
+        if val_set is not None and epoch != 0 and epoch % 1 == 0:
             #fit(args, cfg, net, val_set, optimizer, is_train=False)
             val(args, cfg, net, val_set, optimizer)
         if epoch != 0 and epoch % 5 == 0:
@@ -252,6 +257,9 @@ def main():
         if epoch > 5:
             vb.plot_curves(train_losses, ["location", "confidence"], save_path=args.val_log, name=dt,
                 window=5, fig_size=(18, 6), bound={"low": 0.0, "high": 3.0}, title="Train Loss")
+        # 由于centroid可以向两个方向形成distortion，所以每个epoch后都需要重新创建一次
+        # 以保证两个方向都能够受到distortion
+        net.module.create_centroid()
 
 if __name__ == '__main__':
     main()

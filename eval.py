@@ -13,7 +13,8 @@ from data import VOC_ROOT, VOCAnnotationTransform, VOCDetection, BaseTransform
 from data import VOC_CLASSES as labelmap
 from data import voc, coco
 import imageio
-
+import matplotlib
+matplotlib.use('Agg')
 from ssd import build_ssd
 from layers import *
 import sys
@@ -343,8 +344,8 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
             print("progress: %s/%s cost %.4f seconds."%(i, num_images, time.time() - start))
             start = time.time()
         im, gt, h, w = dataset.pull_item(i)
-        #cv2.imwrite("/home/wang/Pictures/tmp.jpg",
-                    #cv2.cvtColor(im.permute(1, 2, 0).numpy(), cv2.COLOR_BGR2RGB) + 128)
+        cv2.imwrite("/home/wang/Pictures/tmp.jpg",
+                    cv2.cvtColor(im.permute(1, 2, 0).numpy(), cv2.COLOR_BGR2RGB) + 128)
         x = Variable(im.unsqueeze(0))
         if args.cuda:
             x = x.cuda()
