@@ -428,7 +428,7 @@ class DeformableInception(nn.Module):
                  bias=False, concat_block=False):
         super().__init__()
         self.inner_blocks = nn.ModuleList([])
-        self.concat_block = concat_block
+        #self.concat_block = concat_block
         if filters:
             out_dim = filters
         else:
@@ -436,20 +436,17 @@ class DeformableInception(nn.Module):
         for i in range(inner_groups):
             self.inner_blocks.append(dcn.DeformConv(in_channel, out_dim,
                                                     kernel_size=kernel_size, padding=1, bias=bias))
-        if concat_block:
-            self.concat_block = nn.Conv2d(inner_groups * out_dim, inner_groups * out_dim,
-                                         kernel_size=1, padding=0)
         self.final_block = nn.Conv2d(inner_groups * out_dim, num_classes,
-                                     kernel_size=kernel_size, padding=1)
+                                     kernel_size=1, padding=0)
 
     def forward(self, x, deform_map):
         assert len(deform_map) == len(self.inner_blocks)
         out = [block(x, deform_map[i]) for i, block in enumerate(self.inner_blocks)]
-        if self.concat_block:
-            out = self.concat_block(torch.cat(out, dim=1))
-            out = self.final_block(out)
-        else:
-            out = self.final_block(torch.cat(out, dim=1))
+        #if self.concat_block:
+            #out = self.concat_block(torch.cat(out, dim=1))
+            #out = self.final_block(out)
+        #else:
+        out = self.final_block(torch.cat(out, dim=1))
         return out
 
 def visualize_box_and_center(idx, rf_centeroid, prior=None, reg=None,
