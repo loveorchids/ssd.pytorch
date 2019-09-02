@@ -23,7 +23,7 @@ voc = {
     'max_sizes': [60, 111, 162, 213, 264, 315],
     'aspect_ratios': [[2], [2, 3], [2, 3], [2, 3], [2], [2]],
     'variance': [0.1, 0.2],
-    'clip': True,
+    'clip': False,
     'name': 'VOC',
     'stride': [1, 1, 1, 1, 1, 1],
 }
@@ -39,7 +39,7 @@ voc320 = {
     'max_sizes': [60, 111, 162, 213, 264, 315],
     'aspect_ratios': [[2], [2, 3], [2, 3], [2, 3], [2], [2]],
     'variance': [0.1, 0.2],
-    'clip': True,
+    'clip': False,
     'name': 'VOC',
     'stride': [1, 1, 1, 1, 1, 1],
 }
@@ -56,7 +56,7 @@ voc512 = {
     'max_sizes': [60, 111, 162, 213, 264, 315],
     'aspect_ratios': [[2], [2, 3], [2, 3], [2, 3], [2], [2]],
     'variance': [0.1, 0.2],
-    'clip': True,
+    'clip': False,
     'name': 'VOC',
     'stride': [1, 1, 1, 1, 1, 1],
 }
@@ -72,7 +72,7 @@ coco = {
     'max_sizes': [45, 99, 153, 207, 261, 315],
     'aspect_ratios': [[2], [2, 3], [2, 3], [2, 3], [2], [2]],
     'variance': [0.1, 0.2],
-    'clip': True,
+    'clip': False,
     'name': 'COCO',
     'stride': [1, 1, 1, 1, 1, 1],
 }

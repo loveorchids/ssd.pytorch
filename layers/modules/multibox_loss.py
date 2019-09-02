@@ -64,7 +64,6 @@ class MultiBoxLoss(nn.Module):
         batch_num = loc_data.size(0)
         priors = priors[loc_data.device.index][:loc_data.size(1), :]
         num_priors = (priors.size(0))
-        num_classes = self.num_classes
 
         targets_idx = targets_idx.tolist()
         # match priors (default boxes) and ground truth boxes
@@ -76,8 +75,9 @@ class MultiBoxLoss(nn.Module):
             labels = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], -1].data
             #truths = targets[idx][:, :-1].data
             #labels = targets[idx][:, -1].data
-            if self.rematch:
-                defaults = center_size(decode(loc_data[idx], priors.data, self.variance).clamp(min=0, max=1))
+            if self.args.rematch > 0 and self.args.curr_epoch > self.args.rematch:
+            #if self.rematch:
+                defaults = center_size(decode(loc_data[idx], priors.data, self.variance))#.clamp(min=0, max=1))
                 if self.args.visualize_box:
                     start_idx = priors.device.index * batch_num + idx
                     _target = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], :].data

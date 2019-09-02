@@ -60,7 +60,7 @@ class SSD(nn.Module):
                              conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
 
     def create_centroid(self):
-        self.prior_centeroids = [center_conv_point(point_form(prior).clamp(min=0, max=1),
+        self.prior_centeroids = [center_conv_point(point_form(prior),#.clamp(min=0, max=1),
                                                    v3_form=self.args.deformation_source.lower() == "geometric_v3")
                                  for prior in self.priors]
         self.rf_prior_centeroids = [center_conv_point(point_form(rf_prior),

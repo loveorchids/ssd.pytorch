@@ -184,8 +184,9 @@ def main():
                   "--dataset_root was not specified.")
             args.dataset_root = COCO_ROOT
         cfg = coco
-        dataset = COCODetection(root=args.dataset_root,
+        train_set = COCODetection(root=args.dataset_root,
                                 transform=SSDAugmentation(cfg['min_dim'], MEANS))
+        val_set = None
     elif args.dataset == 'VOC':
         #if args.dataset_root == COCO_ROOT:
             #parser.error('Must specify dataset if specifying dataset_root')
@@ -196,19 +197,22 @@ def main():
                                       num_workers=args.num_workers,
                                       shuffle=False, collate_fn=detection_collate,
                                       pin_memory=True)
-
+        val_set = None
+        """
         val_set = VOCDetection(args.voc_root, [('2007', "test")],
                                BaseTransform(args.img_size, (104, 117, 123)),
                                VOCAnnotationTransform())
         val_set = data.DataLoader(val_set, args.batch_size,
                                     num_workers=args.num_workers,
                                     shuffle=False, collate_fn=detection_collate,
-                                    pin_memory=True)
+                                    pin_memory=True)"""
+    else:
+        train_set, val_set = None, None
 
     dt = datetime.datetime.now().strftime("%Y-%m-%d_%H:%M")
     ssd_net = build_ssd(args, 'train', cfg['min_dim'], cfg['num_classes'])
 
-    args.curr_epoch = args.start_iter
+    args.curr_epoch = args.start_iter + args.ft_iter
     if args.resume:
         model_name = "%s_%s_%s.pth" % (args.basenet, args.img_size, args.ft_iter)
         print('Resuming training from %s...' % (model_name))
@@ -239,6 +243,8 @@ def main():
         optimizer = SuperConv(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     #criterion = MultiBoxLoss(cfg['num_classes'], args.overlap_threshold, True, 0,
                              #True, 3, 0.5, False, args.cuda, rematch=args.rematch)
+    else:
+        raise NotImplementedError()
 
     loc_loss, conf_loss = [], []
     accuracy, precision, recall, f1_score = [], [], [], []
@@ -256,21 +262,24 @@ def main():
             f1_score.append(f1)
             val_losses = [np.asarray(accuracy), np.asarray(precision),
                           np.asarray(recall), np.asarray(f1_score)]
-        if epoch != 0 and epoch % 5 == 0:
+        if epoch > 30 and epoch % 10 == 0:
             save_epoch = epoch + args.start_iter + args.ft_iter
             torch.save(net.module.state_dict(),
                        os.path.join(args.save_folder, '%s_%s_%s.pth' %
                                     (args.name, args.img_size, save_epoch)))
         if epoch >= 5:
-            #vb.plot_curves(train_losses, ["location", "confidence"], save_path=args.val_log, name=dt,
-                #window=5, fig_size=(18, 6), bound={"low": 0.0, "high": 3.0}, title="Train Loss")
-            vb.plot_multi_loss_distribution(
-                multi_line_data=[train_losses, val_losses],
-                multi_line_labels=[["location", "confidence"], ["Accuracy", "Precision", "Recall", "F1-Score"]],
-                save_path=args.val_log, window=5, name=dt, fig_size=(18, 12),
-                bound=[{"low": 0.0, "high": 3.0}, {"low": 0.0, "high": 1.0}],
-                titles=["Train Loss", "Validation Score"]
-            )
+            if val_set is None:
+                vb.plot_curves(train_losses, ["location", "confidence"], save_path=args.val_log,
+                               name=dt + "_" + args.name, window=5, fig_size=(18, 6),
+                               bound={"low": 0.0, "high": 3.0}, title="Train Loss")
+            else:
+                vb.plot_multi_loss_distribution(
+                    multi_line_data=[train_losses, val_losses],
+                    multi_line_labels=[["location", "confidence"], ["Accuracy", "Precision", "Recall", "F1-Score"]],
+                    save_path=args.val_log, window=5, name=dt + "_" + args.name, fig_size=(18, 12),
+                    bound=[{"low": 0.0, "high": 3.0}, {"low": 0.0, "high": 1.0}],
+                    titles=["Train Loss", "Validation Score"]
+                )
         # 由于centroid可以向两个方向形成distortion，所以每个epoch后都需要重新创建一次
         # 以保证两个方向都能够受到distortion
         net.module.create_centroid()

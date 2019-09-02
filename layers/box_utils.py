@@ -247,9 +247,7 @@ def nms(boxes, scores, overlap=0.5, top_k=200):
         idx = idx[IoU.le(overlap)]
     return keep, count
 
-def center_conv_point(bboxes, kernel_size=3, c_min=0, c_max=1, v3_form=False):
-    """In a parallel manner also keeps the gradient during BP"""
-    bboxes.clamp_(min=c_min, max=c_max)
+def add_noise(bboxes, kernel_size, v3_form):
     ratios = (bboxes[:, 2] - bboxes[:, 0]) / (bboxes[:, 3] - bboxes[:, 1])
     max_length = torch.max(torch.stack(((bboxes[:, 2] - bboxes[:, 0]), (bboxes[:, 3] - bboxes[:, 1])), dim=1), dim=1)[0]
     # ratios计算方法为宽高比，所以small_idx代表比较高的box
@@ -265,9 +263,11 @@ def center_conv_point(bboxes, kernel_size=3, c_min=0, c_max=1, v3_form=False):
 
     assert kernel_size == 3, "偏移量是为kernel size=3时设计的"
     if v3_form:
-        distortion = torch.FloatTensor([0, -1, 0, -1, 0, -1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1]).cuda(bboxes.device.index)
+        distortion = torch.FloatTensor([0, -1, 0, -1, 0, -1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1]).cuda(
+            bboxes.device.index)
     else:
-        distortion = torch.FloatTensor([-1, 0, -1, 0, -1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0]).cuda(bboxes.device.index)
+        distortion = torch.FloatTensor([-1, 0, -1, 0, -1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0, 1, 0]).cuda(
+            bboxes.device.index)
     distortion2 = distortion.view(kernel_size, kernel_size, 2).permute(1, 0, 2)[:, :, (1, 0)].contiguous().view(-1)
     distortions = distortion.unsqueeze(0).repeat(bboxes.size(0), 1)
     distortions[small_idx] = distortion2
@@ -276,7 +276,11 @@ def center_conv_point(bboxes, kernel_size=3, c_min=0, c_max=1, v3_form=False):
     # 产生随机偏移方向。如果box较高，左侧的centroid会向上也会向下偏移（右侧与左侧相反）
     # 如果box较宽，上方的点会向左或向右偏移（上方与下方偏移方向相反）
     distortions[noise] = distortions[noise] * -1
+    return distortions
 
+def center_conv_point(bboxes, kernel_size=3, c_min=0, c_max=1, v3_form=False):
+    """In a parallel manner also keeps the gradient during BP"""
+    #bboxes.clamp_(min=c_min, max=c_max)
     if v3_form:
         base = torch.cat([bboxes[:, :2][:, (1, 0)]] * (kernel_size ** 2), dim=1)
     else:

@@ -75,14 +75,15 @@ class DetectionHeader(nn.Module):
         # regression is a list, the length of regression equals to the number different aspect ratio
         # under current receptive field, elements of regression are PyTorch Tensor, encoded in
         # point-form, represent the regressed prior boxes.
-        if self.loc_deformation:
-            regression = []
-            for i, loc in enumerate(self.loc_layers):
-                idx = torch.tensor([i + len(self.loc_layers) * _
-                                    for _ in range(x.size(2) * x.size(3))]).long()
-                reg_center = prior_centroid[idx, :].repeat(x.size(0), 1).view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
-                centroid = rf_centroid[idx, :].repeat(x.size(0), 1).view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
-                df_map = (reg_center - centroid) * x.size(2)
+        #if self.loc_deformation:
+        regression = []
+        for i, loc in enumerate(self.loc_layers):
+            idx = torch.tensor([i + len(self.loc_layers) * _
+                                for _ in range(x.size(2) * x.size(3))]).long()
+            reg_center = prior_centroid[idx, :].repeat(x.size(0), 1).view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
+            centroid = rf_centroid[idx, :].repeat(x.size(0), 1).view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
+            df_map = (reg_center - centroid) * x.size(2)
+            if self.loc_deformation:
                 if self.opt.loc_deform_layer.lower() == "normal":
                     regression.append(loc(x, df_map))
                 elif self.opt.loc_deform_layer.lower() == "incep":
@@ -91,17 +92,18 @@ class DetectionHeader(nn.Module):
                     median = reg_center[:, median - 1:median + 1, :, :].repeat(1, self.kernel_size ** 2, 1, 1)
                     for increment in self.opt.cls_deform_increment:
                         # Constrain the extended regression not to exceed the boundary of image
-                        new_reg = (median + (reg_center - median) * increment).clamp(min=0, max=1)
+                        new_reg = (median + (reg_center - median) * increment)#.clamp(min=0, max=1)
                         df_map.append((new_reg - centroid) * x.size(2))
                     regression.append(loc(x, df_map))
                 else:
                     raise NotImplementedError()
-                if x.size(2) == 0:
-                    boxes =decode(regression[-1].permute(0, 2, 3, 1).contiguous().view(-1, 4),
-                                  priors[idx], cfg["variance"]).clamp(min=0, max=1)
-                    visualize_box_and_center(i, centroid, prior=point_form(priors[idx]), reg=boxes, df_map=df_map)
-        else:
-            regression = [loc(x) for loc in self.loc_layers]
+            else:
+                regression.append(loc(x))
+                df_map = None
+            if 10 <= x.size(2) <= 20:
+                boxes =decode(regression[-1].permute(0, 2, 3, 1).contiguous().view(-1, 4),
+                              priors[idx], cfg["variance"])#.clamp(min=0, max=1)
+                visualize_box_and_center(i, centroid, prior=point_form(priors[idx]), reg=boxes, df_map=df_map)
         if verbose:
             print("regression shape is composed of %d %s" % (len(regression), str(regression[0].shape)))
         if self.deformation:
@@ -121,7 +123,7 @@ class DetectionHeader(nn.Module):
                     else:
                         centroid = rf_centroid[idx, :].repeat(x.size(0), 1)
                     _reg = decode(reg.permute(0, 2, 3, 1).contiguous().view(-1, 4),
-                                  prior.repeat(x.size(0), 1), cfg["variance"]).clamp(min=0, max=1)
+                                  prior.repeat(x.size(0), 1), cfg["variance"])#.clamp(min=0, max=1)
                     if self.opt.gt_replace:
                         overlaps = jaccard(y[:, :-1], _reg)
                         tmp = (overlaps > 0.6).nonzero().tolist()
@@ -154,7 +156,7 @@ class DetectionHeader(nn.Module):
                         median = reg_center[:, median-1:median+1, :, :].repeat(1, self.kernel_size**2, 1, 1)
                         for increment in self.opt.cls_deform_increment:
                             # Constrain the extended regression not to exceed the boundary of image
-                            new_reg = (median + (reg_center - median) * increment).clamp(min=0, max=1)
+                            new_reg = (median + (reg_center - median) * increment)#.clamp(min=0, max=1)
                             df_map.append((new_reg - centroid) * x.size(2))
                         cls_deform_map.append(df_map)
                     else:
