@@ -8,6 +8,7 @@ sys.path.append(os.path.expanduser("~/Documents"))
 import omni_torch.visualize.basic as vb
 from matplotlib import gridspec
 from layers.box_utils import *
+import imageio
 
 
 def print_box(red_boxes=(), shape=0, green_boxes=(), blue_boxes=(), img=None,
@@ -193,3 +194,63 @@ def visualize_bbox(args, cfg, images, targets, prior=None, idx=0, prefix="", sta
         plt.savefig(os.path.join(path, "batch_%s_%s_vis_%s.jpg" % (idx, _prefix, start_idx + i)))
         plt.close()
 
+def visualize_box_and_center(idx, rf_centeroid, prior=None, reg=None,
+                             prior_centroid=None, df_map=None, img_size=300):
+    """
+    :param prior: shape=(?, 4)
+    :param rf_centeroid: shape=(?, 18)
+    :return:
+    """
+    h, w = rf_centeroid.size(2), rf_centeroid.size(2)
+    bg = cv2.imread("/home/wang/Pictures/tmp.jpg")
+    if bg is None:
+        bg = np.ones((img_size, img_size, 3)) * 255
+    else:
+        bg = cv2.cvtColor(bg, cv2.COLOR_BGR2RGB)
+    if prior is not None:
+        prior = prior * img_size
+    if reg is not None:
+        reg = reg * img_size
+    if rf_centeroid is not None:
+        rf_centeroid = (rf_centeroid.permute(0, 2, 3, 1).view(rf_centeroid.size(0), -1,
+                                                              rf_centeroid.size(1)) * img_size).long().squeeze(0)
+    if prior_centroid is not None:
+        prior_centroid = (prior_centroid.permute(0, 2, 3, 1).view(prior_centroid.size(0), -1,
+                                                                  prior_centroid.size(1)) * prior_centroid).long().squeeze(0)
+    if df_map is not None:
+        if type(df_map) is not list:
+            df_map = [df_map]
+        df_map = [rf_centeroid + (df.permute(0, 2, 3, 1).view(df.size(0), -1, df.size(1)) * img_size / h).long().squeeze(0)
+                  for df in df_map]
+
+    gif = []
+    for i in range(rf_centeroid.size(0)):
+        canvas = np.ones((img_size, img_size, 3)) * 128
+        if prior is not None:
+            x1, y1, x2, y2 = prior[i].tolist()
+            cv2.rectangle(canvas, (round(x1), round(y1)), (round(x2), round(y2)), (0, 255, 0), 2)
+        if reg is not None:
+            x1, y1, x2, y2 = reg[i].tolist()
+            cv2.rectangle(canvas, (round(x1), round(y1)), (round(x2), round(y2)), (0, 0, 255), 1)
+
+        points = rf_centeroid[i].view(-1, 2).tolist()
+        for point in points:
+            cv2.circle(canvas, (round(point[1]), round(point[0])), 2, (255, 0, 0), 2)
+
+        if prior_centroid is not None:
+            points = prior_centroid[i].view(-1, 2).tolist()
+            for point in points:
+                cv2.circle(canvas, (round(point[1]), round(point[0])), 2, (0, 255, 0), 2)
+
+        if df_map is not None:
+            for df in df_map:
+                reg_points = df[i].view(-1, 2).tolist()
+                for point in reg_points:
+                    cv2.circle(canvas, (round(point[1]), round(point[0])), 2, (0, 0, 255), 2)
+        if bg is None:
+            gif.append(bg.astype(np.uint8))
+        else:
+            gif.append((bg * 0.5 + canvas * 0.5).astype(np.uint8))
+    imageio.mimsave("/home/wang/Pictures/fm_%s_ratio_%s.gif" %
+                    (rf_centeroid.size(0), str(idx).zfill(2)), gif)
+    #cv2.imwrite("/home/wang/Pictures/tmp_%s.jpg"%str(i).zfill(3), canvas)

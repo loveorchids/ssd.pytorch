@@ -474,7 +474,7 @@ def visualize_deformation(cfg, img_tensor, deform_pyramid, reg_boxes, default_bo
             priors = fm_priors[idx, :]
             boxes = fm_reg_boxes[:, idx, :]
 
-            if args.rematch:
+            if args.rematch > 0:
                 overlaps = jaccard(torch.tensor(ground_truth[:, :-1]).float() / args.img_size,
                                    boxes.squeeze(0).data)
             else:

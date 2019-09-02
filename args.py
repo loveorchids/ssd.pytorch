@@ -78,7 +78,7 @@ def prepare_args(root_dir):
                         help="detector_nms_threshold")
     parser.add_argument('--overlap_threshold', type=float, default=0.5,
                         help='overlap threshold to match prior to ground truth')
-    parser.add_argument("--rematch", action="store_true",
+    parser.add_argument("--rematch", type=int, default=0,
                         help="if true, we will use the regressed box produced by localizer to calculate the loss.")
     parser.add_argument('--rematch_overlap_threshold', type=float, default=0.7,
                         help='overlap threshold to match prior to ground truth after regression')

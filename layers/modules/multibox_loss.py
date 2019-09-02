@@ -85,6 +85,10 @@ class MultiBoxLoss(nn.Module):
                     pass
                 threshold = self.args.rematch_overlap_threshold
             else:
+                if self.args.visualize_box:
+                    start_idx = priors.device.index * batch_num + idx
+                    _target = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], :].data
+                    visualize_bbox(self.args, cfg, images[idx:idx+1], [_target], defaults, 0, prefix="reg", start_idx=start_idx)
                 defaults = priors.data
                 threshold = self.threshold
             match(threshold, truths, defaults, self.variance, labels, loc_t, conf_t, idx)

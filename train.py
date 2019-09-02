@@ -51,7 +51,7 @@ def fit(args, cfg, net, dataset, optimizer, is_train=True):
         targets_idx_ = torch.cuda.LongTensor([ann.size(0) for ann in targets])
         targets_idx = torch.cuda.LongTensor([sum(targets_idx_[:_idx]) for _idx in range(len(targets_idx_))])
         if batch_idx == 0 and args.visualize_box:
-            visualize_bbox(args, cfg, images, targets, net.module.priors[0], batch_idx)
+            #visualize_bbox(args, cfg, images, targets, net.module.priors[0], batch_idx)
             pass
         y_idx = torch.stack([targets_idx, targets_idx_], dim=1)
         y = torch.cat(targets, dim=0).repeat(torch.cuda.device_count(), 1)
@@ -247,16 +247,30 @@ def main():
         loc_loss.append(loc_avg)
         conf_loss.append(conf_avg)
         train_losses = [np.asarray(loc_loss), np.asarray(conf_loss)]
-        if val_set is not None and epoch != 0 and epoch % 1 == 0:
+        if val_set is not None:
             #fit(args, cfg, net, val_set, optimizer, is_train=False)
-            val(args, cfg, net, val_set, optimizer)
+            accu, pre, rec, f1 = val(args, cfg, net, val_set, optimizer)
+            accuracy.append(accu)
+            precision.append(pre)
+            recall.append(rec)
+            f1_score.append(f1)
+            val_losses = [np.asarray(accuracy), np.asarray(precision),
+                          np.asarray(recall), np.asarray(f1_score)]
         if epoch != 0 and epoch % 5 == 0:
+            save_epoch = epoch + args.start_iter + args.ft_iter
             torch.save(net.module.state_dict(),
                        os.path.join(args.save_folder, '%s_%s_%s.pth' %
-                                    (args.name, args.img_size, epoch)))
-        if epoch > 5:
-            vb.plot_curves(train_losses, ["location", "confidence"], save_path=args.val_log, name=dt,
-                window=5, fig_size=(18, 6), bound={"low": 0.0, "high": 3.0}, title="Train Loss")
+                                    (args.name, args.img_size, save_epoch)))
+        if epoch >= 5:
+            #vb.plot_curves(train_losses, ["location", "confidence"], save_path=args.val_log, name=dt,
+                #window=5, fig_size=(18, 6), bound={"low": 0.0, "high": 3.0}, title="Train Loss")
+            vb.plot_multi_loss_distribution(
+                multi_line_data=[train_losses, val_losses],
+                multi_line_labels=[["location", "confidence"], ["Accuracy", "Precision", "Recall", "F1-Score"]],
+                save_path=args.val_log, window=5, name=dt, fig_size=(18, 12),
+                bound=[{"low": 0.0, "high": 3.0}, {"low": 0.0, "high": 1.0}],
+                titles=["Train Loss", "Validation Score"]
+            )
         # 由于centroid可以向两个方向形成distortion，所以每个epoch后都需要重新创建一次
         # 以保证两个方向都能够受到distortion
         net.module.create_centroid()
