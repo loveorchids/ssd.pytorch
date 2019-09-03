@@ -282,7 +282,7 @@ def main():
                 )
         # 由于centroid可以向两个方向形成distortion，所以每个epoch后都需要重新创建一次
         # 以保证两个方向都能够受到distortion
-        net.module.create_centroid()
+        #net.module.create_centroid()
 
 if __name__ == '__main__':
     main()
