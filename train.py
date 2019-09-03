@@ -240,7 +240,7 @@ def main():
         optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum,
                               weight_decay=args.weight_decay)
     elif args.optimizer.lower() == "super":
-        optimizer = SuperConv(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = SDProp(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     #criterion = MultiBoxLoss(cfg['num_classes'], args.overlap_threshold, True, 0,
                              #True, 3, 0.5, False, args.cuda, rematch=args.rematch)
     else:
