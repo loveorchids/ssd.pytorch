@@ -1,6 +1,7 @@
 import matplotlib
 matplotlib.use('Agg')
 from data import *
+from layers import *
 from layers.box_utils import *
 from utils.augmentations import SSDAugmentation
 from ssd import build_ssd
@@ -26,6 +27,8 @@ from layers.visualization import *
 args = prepare_args(VOC_ROOT)
 TMPJPG = os.path.expanduser("~/Pictures/tmp.jpg")
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
+criterion = MultiBoxLoss(voc['num_classes'], args, True, 0,
+                                 True, 3, 0.5, False, args.cuda)
 
 
 def avg(list):
@@ -56,11 +59,15 @@ def fit(args, cfg, net, dataset, optimizer, is_train=True):
         y_idx = torch.stack([targets_idx, targets_idx_], dim=1)
         y = torch.cat(targets, dim=0).repeat(torch.cuda.device_count(), 1)
         out1, out2 = net(images, y, y_idx, deform_map=False, test=(not is_train))
+        loss_l, loss_c = criterion(out1, targets)
         if is_train:
             # During train phase, out1 represent loss_l and out2 represent loss_c
-            loss = out1.mean() + out2.mean()
-            Loss_L.append(float(out1.mean().data))
-            Loss_C.append(float(out2.mean().data))
+            #loss = out1.mean() + out2.mean()
+            #Loss_L.append(float(out1.mean().data))
+            #Loss_C.append(float(out2.mean().data))
+            loss = loss_l + loss_c
+            Loss_L.append(float(loss_l.data))
+            Loss_C.append(float(loss_c.data))
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -240,7 +247,7 @@ def main():
         optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=args.momentum,
                               weight_decay=args.weight_decay)
     elif args.optimizer.lower() == "super":
-        optimizer = SDProp(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = Adastand(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     #criterion = MultiBoxLoss(cfg['num_classes'], args.overlap_threshold, True, 0,
                              #True, 3, 0.5, False, args.cuda, rematch=args.rematch)
     else:

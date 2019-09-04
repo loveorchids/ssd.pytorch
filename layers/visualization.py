@@ -137,8 +137,14 @@ def visualize_overlaps(args, cfg, target, label, prior, after_reg=False):
     return images, summary, subtitle, coords
 
 
-def visualize_bbox(args, cfg, images, targets, prior=None, idx=0, prefix="", start_idx=0, path=None):
+def visualize_bbox(args, cfg, images, targets, prior=None, idx=0, prefix="", start_idx=0, path=None, show_detail=True):
     print("Visualizing bound box...")
+    if not prefix:
+        _prefix = "sample"
+    else:
+        _prefix = prefix
+    if path is None:
+        path = args.val_log
     ratios = images.size(3) / images.size(2)
     batch = images.size(0)
     height, width = images.size(2) / 100 + 1, images.size(3) / 50 + 1
@@ -168,31 +174,28 @@ def visualize_bbox(args, cfg, images, targets, prior=None, idx=0, prefix="", sta
         else:
             overlaps = []
             summary = ""
-        fig, ax = plt.subplots(figsize=(width + len(overlaps), height))
-        width_ratio = [2] + [1] * len(overlaps)
-        gs = gridspec.GridSpec(1, 1 + len(overlaps), width_ratios=width_ratio)
-        try:
-            ax0 = plt.subplot(gs[0])
-        except KeyError:
-            return
-        ax0.imshow(image / 255)
-        ax0.set_title(summary)
-        for j in range(len(overlaps)):
-            ax = plt.subplot(gs[j + 1])
-            ax.imshow(overlaps[j])
-            ax.set_title(subtitle[j])
-        for rect in rects:
-            ax0.add_patch(rect)
-        plt.grid(False)
-        plt.tight_layout()
-        if not prefix:
-            _prefix = "sample"
+        if show_detail:
+            fig, ax = plt.subplots(figsize=(width + len(overlaps), height))
+            width_ratio = [2] + [1] * len(overlaps)
+            gs = gridspec.GridSpec(1, 1 + len(overlaps), width_ratios=width_ratio)
+            try:
+                ax0 = plt.subplot(gs[0])
+            except KeyError:
+                return
+            ax0.imshow(image / 255)
+            ax0.set_title(summary)
+            for j in range(len(overlaps)):
+                ax = plt.subplot(gs[j + 1])
+                ax.imshow(overlaps[j])
+                ax.set_title(subtitle[j])
+            for rect in rects:
+                ax0.add_patch(rect)
+            plt.grid(False)
+            plt.tight_layout()
+            plt.savefig(os.path.join(path, "batch_%s_%s_vis_%s.jpg" % (idx, _prefix, start_idx + i)))
+            plt.close()
         else:
-            _prefix = prefix
-        if path is None:
-            path = args.val_log
-        plt.savefig(os.path.join(path, "batch_%s_%s_vis_%s.jpg" % (idx, _prefix, start_idx + i)))
-        plt.close()
+            cv2.imwrite(os.path.join(path, "batch_%s_%s_vis_%s.jpg" % (idx, _prefix, start_idx + i)), image)
 
 def visualize_box_and_center(idx, rf_centeroid, prior=None, reg=None,
                              prior_centroid=None, df_map=None, img_size=300):

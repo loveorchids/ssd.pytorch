@@ -153,9 +153,10 @@ class SSD(nn.Module):
                 conf.view(conf.size(0), -1, self.num_classes),
                 self.priors
             )
-            loss_l, loss_c = self.criterion(output, y, y_idx, images=input)
+            #loss_l, loss_c = self.criterion(output, y, y_idx, images=input)
             #print(loss_l, loss_c)
-            return loss_l.unsqueeze(0), loss_c.unsqueeze(0)
+            #return loss_l.unsqueeze(0), loss_c.unsqueeze(0)
+            return output, None
 
 
     def load_weights(self, base_file):

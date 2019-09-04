@@ -107,8 +107,8 @@ def match(threshold, truths, priors, variances, labels, loc_t, conf_t, idx, visu
     #print(best_truth_idx[best_prior_idx])
     #best_truth_overlap.index_fill_(0, best_prior_idx, 2)  # ensure best prior
     # ensure every gt matches with its prior of max overlap
-    #for j in range(best_prior_idx.size(0)):
-        #best_truth_idx[best_prior_idx[j]] = j
+    for j in range(best_prior_idx.size(0)):
+        best_truth_idx[best_prior_idx[j]] = j
     #print(best_truth_idx[best_prior_idx])
     #print("")
     matches = truths[best_truth_idx]          # Shape: [num_priors,4]

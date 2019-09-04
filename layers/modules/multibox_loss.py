@@ -1,3 +1,6 @@
+import os, sys
+sys.path.append(os.path.expanduser("~/Documents"))
+import omni_torch.visualize.basic as vb
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -48,7 +51,7 @@ class MultiBoxLoss(nn.Module):
         self.variance = cfg['variance']
         self.rematch = rematch
 
-    def forward(self, predictions, targets, targets_idx, images=None):
+    def forward(self, predictions, targets, targets_idx=None, images=None):
         """Multibox Loss
         Args:
             predictions (tuple): A tuple containing loc preds, conf preds,
@@ -65,32 +68,37 @@ class MultiBoxLoss(nn.Module):
         priors = priors[loc_data.device.index][:loc_data.size(1), :]
         num_priors = (priors.size(0))
 
-        targets_idx = targets_idx.tolist()
+        if targets_idx is not None:
+            targets_idx = targets_idx.tolist()
         # match priors (default boxes) and ground truth boxes
         loc_t = torch.cuda.FloatTensor(batch_num, num_priors, 4)
         conf_t = torch.cuda.LongTensor(batch_num, num_priors)
 
         for idx in range(batch_num):
-            truths = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], :-1].data
-            labels = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], -1].data
-            #truths = targets[idx][:, :-1].data
-            #labels = targets[idx][:, -1].data
-            if self.args.rematch > 0 and self.args.curr_epoch > self.args.rematch:
+            if targets_idx is not None:
+                truths = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], :-1].data
+                labels = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], -1].data
+            else:
+                truths = targets[idx][:, :-1].data
+                labels = targets[idx][:, -1].data
+            if self.args.curr_epoch >= self.args.rematch:
             #if self.rematch:
                 defaults = center_size(decode(loc_data[idx], priors.data, self.variance))#.clamp(min=0, max=1))
                 if self.args.visualize_box:
                     start_idx = priors.device.index * batch_num + idx
                     _target = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], :].data
-                    visualize_bbox(self.args, cfg, images[idx:idx+1], [_target], defaults, 0, prefix="reg", start_idx=start_idx)
+                    visualize_bbox(self.args, cfg, images[idx:idx+1], [_target], defaults, 0, prefix="reg",
+                                   start_idx=start_idx, show_detail=False)
                     pass
                 threshold = self.args.rematch_overlap_threshold
             else:
+                defaults = priors.data
+                threshold = self.threshold
                 if self.args.visualize_box:
                     start_idx = priors.device.index * batch_num + idx
                     _target = targets[targets_idx[idx][0]: targets_idx[idx][0] + targets_idx[idx][1], :].data
-                    visualize_bbox(self.args, cfg, images[idx:idx+1], [_target], defaults, 0, prefix="reg", start_idx=start_idx)
-                defaults = priors.data
-                threshold = self.threshold
+                    visualize_bbox(self.args, cfg, images[idx:idx+1], [_target], defaults, 0, prefix="reg",
+                                   start_idx=start_idx, show_detail=False)
             match(threshold, truths, defaults, self.variance, labels, loc_t, conf_t, idx)
 
         # wrap targets
@@ -98,7 +106,7 @@ class MultiBoxLoss(nn.Module):
         #conf_t = Variable(conf_t, requires_grad=False)
 
         pos = conf_t > 0
-        num_pos = pos.sum(dim=1, keepdim=True)
+        #num_pos = pos.sum(dim=1, keepdim=True)
 
         # Localization Loss (Smooth L1)
         # Shape: [batch,num_priors,4]
@@ -106,7 +114,8 @@ class MultiBoxLoss(nn.Module):
         loc_p = loc_data[pos_idx].view(-1, 4)
         loc_t = loc_t[pos_idx].view(-1, 4)
         loss_l = F.smooth_l1_loss(loc_p, loc_t, size_average=False)
-
+        print("Loc Loss: %.2f by %d positive match with %d images, avg: %.1f match per image."
+              % (float(loss_l), int(torch.sum(pos)), batch_num, int(torch.sum(pos)) / batch_num))
         # Compute max conf across batch for hard negative mining
         batch_conf = conf_data.view(-1, self.num_classes)
         # batch_conf.gather(1, conf_t.view(-1, 1))

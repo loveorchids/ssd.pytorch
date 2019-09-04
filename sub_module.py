@@ -100,7 +100,7 @@ class DetectionHeader(nn.Module):
             else:
                 regression.append(loc(x))
                 df_map = None
-            if 10 <= x.size(2) <= 20 and True:
+            if 10 <= x.size(2) <= 20 and False:
                 boxes =decode(regression[-1].permute(0, 2, 3, 1).contiguous().view(-1, 4),
                               priors[idx], cfg["variance"])#.clamp(min=0, max=1)
                 visualize_box_and_center(i, centroid, prior=point_form(priors[idx]), reg=boxes, df_map=df_map)
