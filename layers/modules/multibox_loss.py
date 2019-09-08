@@ -73,6 +73,8 @@ class MultiBoxLoss(nn.Module):
         # match priors (default boxes) and ground truth boxes
         loc_t = torch.cuda.FloatTensor(batch_num, num_priors, 4)
         conf_t = torch.cuda.LongTensor(batch_num, num_priors)
+        #loc_t = Variable(loc_t, requires_grad=False)
+        #conf_t = Variable(conf_t, requires_grad=False)
 
         for idx in range(batch_num):
             if targets_idx is not None:
@@ -81,7 +83,7 @@ class MultiBoxLoss(nn.Module):
             else:
                 truths = targets[idx][:, :-1].data
                 labels = targets[idx][:, -1].data
-            if self.args.curr_epoch >= self.args.rematch:
+            if self.args.curr_epoch >= self.args.rematch and self.args.rematch != 0:
             #if self.rematch:
                 defaults = center_size(decode(loc_data[idx], priors.data, self.variance))#.clamp(min=0, max=1))
                 if self.args.visualize_box:
@@ -102,8 +104,7 @@ class MultiBoxLoss(nn.Module):
             match(threshold, truths, defaults, self.variance, labels, loc_t, conf_t, idx)
 
         # wrap targets
-        #loc_t = Variable(loc_t, requires_grad=False)
-        #conf_t = Variable(conf_t, requires_grad=False)
+        rematch = "Rematch" if self.args.curr_epoch >= self.args.rematch and self.args.rematch != 0 else "No_rematch"
 
         pos = conf_t > 0
         #num_pos = pos.sum(dim=1, keepdim=True)
@@ -114,8 +115,8 @@ class MultiBoxLoss(nn.Module):
         loc_p = loc_data[pos_idx].view(-1, 4)
         loc_t = loc_t[pos_idx].view(-1, 4)
         loss_l = F.smooth_l1_loss(loc_p, loc_t, size_average=False)
-        print("Loc Loss: %.2f by %d positive match with %d images, avg: %.1f match per image."
-              % (float(loss_l), int(torch.sum(pos)), batch_num, int(torch.sum(pos)) / batch_num))
+        print("%s: Loc Loss: %.2f by %d positive match with %d images, avg: %.1f match per image."
+              % (rematch, float(loss_l), int(torch.sum(pos)), batch_num, int(torch.sum(pos)) / batch_num))
         # Compute max conf across batch for hard negative mining
         batch_conf = conf_data.view(-1, self.num_classes)
         # batch_conf.gather(1, conf_t.view(-1, 1))

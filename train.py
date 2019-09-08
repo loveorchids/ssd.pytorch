@@ -269,7 +269,7 @@ def main():
             f1_score.append(f1)
             val_losses = [np.asarray(accuracy), np.asarray(precision),
                           np.asarray(recall), np.asarray(f1_score)]
-        if epoch > 30 and epoch % 10 == 0:
+        if epoch + args.start_iter + args.ft_iter > 30 and epoch % 10 == 0:
             save_epoch = epoch + args.start_iter + args.ft_iter
             torch.save(net.module.state_dict(),
                        os.path.join(args.save_folder, '%s_%s_%s.pth' %

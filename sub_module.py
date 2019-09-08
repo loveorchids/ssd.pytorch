@@ -80,10 +80,10 @@ class DetectionHeader(nn.Module):
         for i, loc in enumerate(self.loc_layers):
             idx = torch.tensor([i + len(self.loc_layers) * _
                                 for _ in range(x.size(2) * x.size(3))]).long()
-            reg_center = prior_centroid[idx, :].repeat(x.size(0), 1).view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
-            centroid = rf_centroid[idx, :].repeat(x.size(0), 1).view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
-            df_map = (reg_center - centroid) * x.size(2)
             if self.loc_deformation:
+                reg_center = prior_centroid[idx, :].repeat(x.size(0), 1).view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
+                centroid = rf_centroid[idx, :].repeat(x.size(0), 1).view(x.size(0), x.size(2), x.size(3), -1).permute(0, 3, 1, 2)
+                df_map = (reg_center - centroid) * x.size(2)
                 if self.opt.loc_deform_layer.lower() == "normal":
                     regression.append(loc(x, df_map))
                 elif self.opt.loc_deform_layer.lower() == "incep":
