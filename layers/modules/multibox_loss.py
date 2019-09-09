@@ -65,7 +65,8 @@ class MultiBoxLoss(nn.Module):
         """
         loc_data, conf_data, priors = predictions
         batch_num = loc_data.size(0)
-        priors = priors[loc_data.device.index][:loc_data.size(1), :]
+        #priors = priors[loc_data.device.index][:loc_data.size(1), :]
+        priors = priors[:loc_data.size(1), :]
         num_priors = (priors.size(0))
 
         if targets_idx is not None:
