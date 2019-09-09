@@ -35,13 +35,17 @@ class SSD(nn.Module):
         self.phase = phase
         self.num_classes = num_classes
         self.cfg = (coco, voc)[num_classes == 21]
-        priorBox = PriorBox(self.cfg)
-        rf_Box = ReceptiveFieldPrior(self.cfg)
-        prior = priorBox.forward()
-        rf_prior = rf_Box.forward()
-        self.priors = [prior.cuda(i) for i in range(torch.cuda.device_count())]
-        self.rf_priors = [rf_prior.cuda(i) for i in range(torch.cuda.device_count())]
-        self.create_centroid()
+        #priorBox = PriorBox(self.cfg)
+        #rf_Box = ReceptiveFieldPrior(self.cfg)
+        #prior = priorBox.forward()
+        #rf_prior = rf_Box.forward()
+        #self.priors = [prior.cuda(i) for i in range(torch.cuda.device_count())]
+        #self.rf_priors = [rf_prior.cuda(i) for i in range(torch.cuda.device_count())]
+        self.priors = PriorBox(self.cfg).forward()
+        self.rf_priors = ReceptiveFieldPrior(self.cfg).forward()
+        #self.create_centroid()
+        self.prior_centeroids = None
+        self.rf_prior_centeroids = None
         # SSD network
         self.vgg = nn.ModuleList(base)
         # Layer learns to scale the l2 normalized features from conv4_3
@@ -53,8 +57,8 @@ class SSD(nn.Module):
         elif args.implementation == "vanilla":
             self.loc = nn.ModuleList(head[0])
             self.conf = nn.ModuleList(head[1])
-        self.criterion = MultiBoxLoss(self.cfg['num_classes'], args, True, 0,
-                                 True, 3, 0.5, False, args.cuda)
+        #self.criterion = MultiBoxLoss(self.cfg['num_classes'], args, True, 0,
+                                 #True, 3, 0.5, False, args.cuda)
         self.softmax = nn.Softmax(dim=-1)
         self.detect = Detect(num_classes, bkg_label=0, top_k=args.top_k,
                              conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
@@ -125,11 +129,16 @@ class SSD(nn.Module):
                               cfg=self.cfg, y=y)
                   deform.append(d)
                 else:
-                  l, c = h(x, input_h, deform_map=deform_map,
-                           priors=self.priors[x.device.index][start_id: end_id],
-                           rf_centroid=self.rf_prior_centeroids[x.device.index][start_id: end_id],
-                           prior_centroid=self.prior_centeroids[x.device.index][start_id: end_id],
-                           cfg=self.cfg, y=y)
+                    """
+                    l, c = h(x, input_h, deform_map=deform_map,
+                             priors=self.priors[x.device.index][start_id: end_id],
+                             rf_centroid=self.rf_prior_centeroids[x.device.index][start_id: end_id],
+                             prior_centroid=self.prior_centeroids[x.device.index][start_id: end_id],
+                             cfg=self.cfg, y=y)"""
+                    l, c = h(x, input_h, deform_map=deform_map,
+                             priors=self.priors[start_id: end_id],
+                             cfg=self.cfg, y=y)
+
                 start_id = end_id
                 loc.append(l.permute(0, 2, 3, 1).contiguous())
                 conf.append(c.permute(0, 2, 3, 1).contiguous())
@@ -145,7 +154,8 @@ class SSD(nn.Module):
         if test:
             output = self.detect(loc.view(loc.size(0), -1, 4),
                                  self.softmax(conf.view(conf.size(0), -1, self.num_classes)),
-                                 self.priors[x.device.index].type(type(x.data)))
+                                 #self.priors[x.device.index].type(type(x.data)))
+                                 self.priors.type(type(x.data)))
             return output, deform
         else:
             output = (
