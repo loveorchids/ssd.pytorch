@@ -205,7 +205,7 @@ class DeformableInception(nn.Module):
         assert len(deform_map) == len(self.inner_blocks)
         out = [block(x, deform_map[i]) for i, block in enumerate(self.inner_blocks)]
         if self.concat_block:
-            out = sum(out) / len(sum)
-        else:
             out = self.final_block(torch.cat(out, dim=1))
+        else:
+            out = sum(out) / len(out)
         return out

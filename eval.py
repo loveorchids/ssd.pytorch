@@ -332,10 +332,10 @@ def test_net(save_folder, net, cuda, dataset, transform, top_k,
                  for _ in range(len(labelmap)+1)]
 
     _t = {'im_detect': Timer(), 'misc': Timer()}
-    output_dir = os.path.join(os.getcwd(), "experiments", args.name)
+    output_dir = os.path.join(os.getcwd(), "experiments")
     if not os.path.exists(output_dir):
         os.mkdir(output_dir)
-    det_file = os.path.join(output_dir, 'detections_%s.pkl'%args.iter)
+    det_file = os.path.join(output_dir, 'detections_%s_%s.pkl'%(args.name, args.iter))
     #progress = open(os.path.join(output_dir, "time_consumption_%s.txt"%args.iter), "w")
 
     start = time.time()

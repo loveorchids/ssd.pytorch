@@ -35,17 +35,13 @@ class SSD(nn.Module):
         self.phase = phase
         self.num_classes = num_classes
         self.cfg = (coco, voc)[num_classes == 21]
-        #priorBox = PriorBox(self.cfg)
-        #rf_Box = ReceptiveFieldPrior(self.cfg)
-        #prior = priorBox.forward()
-        #rf_prior = rf_Box.forward()
-        #self.priors = [prior.cuda(i) for i in range(torch.cuda.device_count())]
-        #self.rf_priors = [rf_prior.cuda(i) for i in range(torch.cuda.device_count())]
-        self.priors = PriorBox(self.cfg).forward()
-        self.rf_priors = ReceptiveFieldPrior(self.cfg).forward()
-        #self.create_centroid()
-        self.prior_centeroids = None
-        self.rf_prior_centeroids = None
+        priorBox = PriorBox(self.cfg)
+        rf_Box = ReceptiveFieldPrior(self.cfg)
+        prior = priorBox.forward()
+        rf_prior = rf_Box.forward()
+        self.priors = [prior.cuda(i) for i in range(torch.cuda.device_count())]
+        self.rf_priors = [rf_prior.cuda(i) for i in range(torch.cuda.device_count())]
+        self.create_centroid()
         # SSD network
         self.vgg = nn.ModuleList(base)
         # Layer learns to scale the l2 normalized features from conv4_3
@@ -129,16 +125,11 @@ class SSD(nn.Module):
                               cfg=self.cfg, y=y)
                   deform.append(d)
                 else:
-                    """
                     l, c = h(x, input_h, deform_map=deform_map,
                              priors=self.priors[x.device.index][start_id: end_id],
                              rf_centroid=self.rf_prior_centeroids[x.device.index][start_id: end_id],
                              prior_centroid=self.prior_centeroids[x.device.index][start_id: end_id],
-                             cfg=self.cfg, y=y)"""
-                    l, c = h(x, input_h, deform_map=deform_map,
-                             priors=self.priors[start_id: end_id],
                              cfg=self.cfg, y=y)
-
                 start_id = end_id
                 loc.append(l.permute(0, 2, 3, 1).contiguous())
                 conf.append(c.permute(0, 2, 3, 1).contiguous())
