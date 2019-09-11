@@ -190,7 +190,7 @@ class DeformableInception(nn.Module):
         super().__init__()
         self.inner_blocks = nn.ModuleList([])
         self.concat_block = concat_block
-        if filters is None or concat_block:
+        if filters is None or not concat_block:
             out_dim = num_classes
         else:
             out_dim = filters

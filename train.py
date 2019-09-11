@@ -57,15 +57,15 @@ def old_fit(args, cfg, net, train_set, optimizer, criterion):
             batch_iterator = iter(train_loader)
             images, targets, _shape = next(batch_iterator)
         t0 = time.time()
-        images = Variable(images.cuda())
-        targets = [Variable(ann.cuda(), volatile=True) for ann in targets]
+        #images = Variable(images.cuda())
+        #targets = [Variable(ann.cuda(), volatile=True) for ann in targets]
 
-        #images = images.cuda()
-        #targets = [ann.cuda() for ann in targets]
-        #targets_idx_ = torch.cuda.LongTensor([ann.size(0) for ann in targets])
-        #targets_idx = torch.cuda.LongTensor([sum(targets_idx_[:_idx]) for _idx in range(len(targets_idx_))])
-        #y_idx = torch.stack([targets_idx, targets_idx_], dim=1)
-        #y = torch.cat(targets, dim=0).repeat(torch.cuda.device_count(), 1)
+        images = images.cuda()
+        targets = [ann.cuda() for ann in targets]
+        targets_idx_ = torch.cuda.LongTensor([ann.size(0) for ann in targets])
+        targets_idx = torch.cuda.LongTensor([sum(targets_idx_[:_idx]) for _idx in range(len(targets_idx_))])
+        y_idx = torch.stack([targets_idx, targets_idx_], dim=1)
+        y = torch.cat(targets, dim=0).repeat(torch.cuda.device_count(), 1)
 
         if iteration == 0 and args.visualize_box:
             # visualize_bbox(args, cfg, images, targets, net.module.priors[0], batch_idx)
@@ -76,7 +76,9 @@ def old_fit(args, cfg, net, train_set, optimizer, criterion):
 
         # backprop
         optimizer.zero_grad()
-        loss_l, loss_c = criterion(out1, targets)
+        out = (out1, out2, net.module.priors)
+        loss_l, loss_c = criterion(out, targets)
+        #loss_l, loss_c = out1, out2
         loss = loss_l + loss_c
         loss.backward()
         optimizer.step()

@@ -53,8 +53,8 @@ class SSD(nn.Module):
         elif args.implementation == "vanilla":
             self.loc = nn.ModuleList(head[0])
             self.conf = nn.ModuleList(head[1])
-        #self.criterion = MultiBoxLoss(self.cfg['num_classes'], args, True, 0,
-                                 #True, 3, 0.5, False, args.cuda)
+        self.criterion = MultiBoxLoss(self.cfg['num_classes'], args, True, 0,
+                                 True, 3, 0.5, False, args.cuda)
         self.softmax = nn.Softmax(dim=-1)
         self.detect = Detect(num_classes, bkg_label=0, top_k=args.top_k,
                              conf_thresh=args.conf_threshold, nms_thresh=args.nms_threshold)
@@ -145,19 +145,21 @@ class SSD(nn.Module):
         if test:
             output = self.detect(loc.view(loc.size(0), -1, 4),
                                  self.softmax(conf.view(conf.size(0), -1, self.num_classes)),
-                                 #self.priors[x.device.index].type(type(x.data)))
-                                 self.priors.type(type(x.data)))
+                                 self.priors[x.device.index].type(type(x.data)))
+                                 #self.priors.type(type(x.data)))
             return output, deform
         else:
+            """
             output = (
                 loc.view(loc.size(0), -1, 4),
                 conf.view(conf.size(0), -1, self.num_classes),
-                self.priors
+                self.priors[x.device.index]
             )
             #loss_l, loss_c = self.criterion(output, y, y_idx, images=input)
             #print(loss_l, loss_c)
             #return loss_l.unsqueeze(0), loss_c.unsqueeze(0)
-            return output, None
+            return output, None"""
+            return loc.view(loc.size(0), -1, 4), conf.view(conf.size(0), -1, self.num_classes)
 
 
     def load_weights(self, base_file):
